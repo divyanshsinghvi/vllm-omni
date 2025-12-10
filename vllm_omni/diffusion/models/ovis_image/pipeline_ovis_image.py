@@ -25,7 +25,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from diffusers.image_processor import VaeImageProcessor
-from diffusers.models.autoencoder.autoencoder_kl import AutoencoderKL
+from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from diffusers.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler,
 )
@@ -34,17 +34,17 @@ from transformers import Qwen2TokenizerFast, Qwen3Model
 from vllm.logger import init_logger
 from vllm.model_executor.models.utils import AutoWeightsLoader
 
+from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.utils import get_local_device
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
-from vllm_omni.diffusion.models.data import DiffusionOutput, OmniDiffusionConfig
-from vllm_omni.diffusion.models.ovis_image.ovis_image_transformer_2d_model import OvisImageTransformer2DModel
+from vllm_omni.diffusion.models.ovis_image.ovis_image_transformer import OvisImageTransformer2DModel
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.model_executor.model_loader.weight_utils import download_weights_from_hf_specific
 
 logger = init_logger(__name__)
 
 
-def get_omni_image_post_process_func(
+def get_ovis_image_post_process_func(
     od_config: OmniDiffusionConfig,
 ):
     model_name = od_config.model

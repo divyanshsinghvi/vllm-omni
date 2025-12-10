@@ -494,7 +494,7 @@ class OvisImagePipeline(
             #     latents = callback_outputs.pop("latents", latents)
             #     prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
 
-            return latents
+        return latents
 
     @property
     def guidance_scale(self):

@@ -550,13 +550,13 @@ class OvisImageTransformer2DModel(nn.Module):
 def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
     stacked_params_mapping = [
         # self attn
-        (".to_qkv", ".to_q.", "q"),
-        (".to_qkv", ".to_k.", "k"),
-        (".to_qkv", ".to_v.", "v"),
+        (".to_qkv", ".to_q", "q"),
+        (".to_qkv", ".to_k", "k"),
+        (".to_qkv", ".to_v", "v"),
         # cross attn
-        (".add_kv_proj", ".add_q_proj.", "q"),
-        (".add_kv_proj", ".add_k_proj.", "k"),
-        (".add_kv_proj", ".add_v_proj.", "v"),
+        (".add_kv_proj", ".add_q_proj", "q"),
+        (".add_kv_proj", ".add_k_proj", "k"),
+        (".add_kv_proj", ".add_v_proj", "v"),
     ]
 
     params_dict = dict(self.named_parameters())

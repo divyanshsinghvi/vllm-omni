@@ -103,33 +103,6 @@ class OvisImageAttention(nn.Module):
             causal=False,
         )
 
-    # def _get_projections(self, hidden_states, encoder_hidden_states=None):
-    #     query = self.to_q(hidden_states)
-    #     key = self.to_k(hidden_states)
-    #     value = self.to_v(hidden_states)
-
-    #     encoder_query = encoder_key = encoder_value = None
-    #     if encoder_hidden_states is not None and self.added_kv_proj_dim is not None:
-    #         encoder_query = self.add_q_proj(encoder_hidden_states)
-    #         encoder_key = self.add_k_proj(encoder_hidden_states)
-    #         encoder_value = self.add_v_proj(encoder_hidden_states)
-
-    #     return query, key, value, encoder_query, encoder_key, encoder_value
-
-    # def _get_fused_projections(self, hidden_states, encoder_hidden_states=None):
-    #     query, key, value = self.to_qkv(hidden_states).chunk(3, dim=-1)
-
-    #     encoder_query = encoder_key = encoder_value = (None,)
-    #     if encoder_hidden_states is not None and hasattr(self, "to_added_qkv"):
-    #         encoder_query, encoder_key, encoder_value = self.to_added_qkv(encoder_hidden_states).chunk(3, dim=-1)
-
-    #     return query, key, value, encoder_query, encoder_key, encoder_value
-
-    # def _get_qkv_projections(self, hidden_states, encoder_hidden_states=None):
-    #     if self.fused_projections:
-    #         return self._get_fused_projections(hidden_states, encoder_hidden_states)
-    #     return self._get_projections(hidden_states, encoder_hidden_states)
-
     def forward(
         self,
         hidden_states: torch.Tensor,

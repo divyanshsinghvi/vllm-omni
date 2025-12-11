@@ -1,3 +1,17 @@
+"""
+Tests for Ovis Image model pipeline.
+
+Strategy:
+1. `mock_dependencies` fixture mocks heavy external components (VAE, Scheduler, TextEncoder)
+   to allow fast testing of the pipeline logic without downloading weights.
+   - Mocks are configured to return tensors on the correct device.
+   - Transformer is mocked dynamically to return random noise of correct shape.
+
+2. `test_real_transformer_init_and_forward` tests the actual `OvisImageTransformer2DModel`
+   initialization and forward pass with a small configuration to ensure code coverage
+   and correctness of the model definition itself, independent of the pipeline mocks.
+"""
+
 from unittest.mock import MagicMock, patch
 
 import pytest

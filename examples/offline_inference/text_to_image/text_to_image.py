@@ -11,22 +11,30 @@ from vllm_omni.utils.platform_utils import detect_device_type, is_npu
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate an image with Qwen-Image.")
+    parser = argparse.ArgumentParser(description="Generate an image with vllm-omni.")
     parser.add_argument("--model", default="Qwen/Qwen-Image", help="Diffusion model name or local path.")
     parser.add_argument("--prompt", default="a cup of coffee on the table", help="Text prompt for image generation.")
+    parser.add_argument("--negative_prompt", default=None, help="Negative text prompt for image generation.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for deterministic results.")
+    parser.add_argument(
+        "--guidance_scale",
+        type=float,
+        default=4.0,
+        help="Classifier-free guidance scale.",
+    )
     parser.add_argument(
         "--cfg_scale",
         type=float,
         default=4.0,
-        help="True classifier-free guidance scale specific to Qwen-Image.",
+        dest="guidance_scale",
+        help="Alias for --guidance_scale.",
     )
     parser.add_argument("--height", type=int, default=1024, help="Height of generated image.")
     parser.add_argument("--width", type=int, default=1024, help="Width of generated image.")
     parser.add_argument(
         "--output",
         type=str,
-        default="qwen_image_output.png",
+        default="generated_image.png",
         help="Path to save the generated image (PNG).",
     )
     parser.add_argument(
@@ -58,20 +66,27 @@ def main():
         vae_use_slicing=vae_use_slicing,
         vae_use_tiling=vae_use_tiling,
     )
-    images = omni.generate(
-        args.prompt,
-        height=args.height,
-        width=args.width,
-        generator=generator,
-        true_cfg_scale=args.cfg_scale,
-        num_inference_steps=args.num_inference_steps,
-        num_outputs_per_prompt=args.num_images_per_prompt,
-    )
+
+    # Filter out None values to let the model use its defaults
+    generate_kwargs = {
+        "prompt": args.prompt,
+        "negative_prompt": args.negative_prompt,
+        "height": args.height,
+        "width": args.width,
+        "generator": generator,
+        "guidance_scale": args.guidance_scale,
+        "true_cfg_scale": args.guidance_scale,
+        "num_inference_steps": args.num_inference_steps,
+        "num_outputs_per_prompt": args.num_images_per_prompt,
+    }
+    generate_kwargs = {k: v for k, v in generate_kwargs.items() if v is not None}
+
+    images = omni.generate(**generate_kwargs)
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     suffix = output_path.suffix or ".png"
-    stem = output_path.stem or "qwen_image_output"
+    stem = output_path.stem or "generated_image"
     if args.num_images_per_prompt <= 1:
         images[0].save(output_path)
         print(f"Saved generated image to {output_path}")

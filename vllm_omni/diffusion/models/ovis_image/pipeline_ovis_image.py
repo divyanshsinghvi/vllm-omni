@@ -150,7 +150,7 @@ class OvisImagePipeline(
     ):
         super().__init__()
         self.od_config = od_config
-        self.weight_sources = [
+        self.weights_sources = [
             DiffusersPipelineLoader.ComponentSource(
                 model_or_path=od_config.model,
                 subfolder="transformer",

@@ -1,0 +1,37 @@
+# Stage config for running CosyVoice3 with 2 stage architecture
+# Stage 0: TextSpeech Language Model (text prompt → speech tokens)
+# Stage 1: Chunk aware flow matching (Chunk aware flow matching)
+# Stage 2: Acoustic Features to Waveform (acoustic features → audio waveform)
+
+stage_args:
+  - stage_id: 0
+    runtime:
+      devices: 0
+      max_batch_size: 1
+    engine_args:
+      model_stage: text_speech_lm
+      model_arch: CosyVoiceModel
+      trust_remote_code: true
+    is_comprehension: true
+
+  - stage_id: 1
+    runtime:
+      devices: 0
+      max_batch_size: 1
+    engine_args:
+      model_stage: chunk_aware_flow_matching
+      model_arch: CosyVoiceModel
+      trust_remote_code: true
+    engine_input_source: [0]
+
+  - stage_id: 2
+    runtime:
+      devices: 0
+      max_batch_size: 1
+    engine_args:
+      model_stage: acoustic_features_to_waveform
+      model_arch: CosyVoiceModel
+      trust_remote_code: true
+    engine_input_source: [1]
+    final_output: true
+    final_output_type: audio

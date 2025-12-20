@@ -12,7 +12,6 @@ stage_args:
       model_stage: text_speech_lm
       model_arch: CosyVoiceModel
       trust_remote_code: true
-    is_comprehension: true
 
   - stage_id: 1
     runtime:

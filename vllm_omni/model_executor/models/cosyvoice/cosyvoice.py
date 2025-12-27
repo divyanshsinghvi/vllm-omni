@@ -1,13 +1,12 @@
-import json
 import os
 from collections.abc import Iterable, Mapping, Sequence
 from functools import partial
 
-import librosa
 import numpy as np
 import onnxruntime
 import torch
 import torch.nn as nn
+import torchaudio
 import torchaudio.compliance.kaldi as kaldi
 import whisper
 from transformers.configuration_utils import PretrainedConfig
@@ -40,6 +39,7 @@ from vllm_omni.model_executor.models.qwen3_omni.qwen3_omni_moe_thinker import (
 logger = init_logger(__name__)
 
 
+# TODO: text_normalization needs to be done?
 class CosyVoiceConfig(PretrainedConfig):
     model_type = "cosyvoice"
 
@@ -52,10 +52,12 @@ class CosyVoiceConfig(PretrainedConfig):
         self.spk_embed_dim = 192
         self.token_frame_rate = 25
         self.token_mel_ratio = 2
+        self.vocab_size = 151923
         self.min_token_text_ratio = 2
         self.max_token_text_ratio = 20
         self.allowed_special = "all"
         self.skip_special_tokens = True
+        self.target_sr = 24000
         self.feat_extractor = {
             "n_fft": 1920,
             "num_mels": 80,
@@ -197,42 +199,45 @@ def _concat_text_with_prompt_ids(
 
 
 def extract_text_token(text, tokenizer, allowed_special):
-    text_token = tokenizer.tokenizer(text, return_tensors="pt")["input_ids"]
+    text_token = tokenizer.encode(text, allowed_special=allowed_special)
     # logger.info(text_token)
+    text_token = torch.tensor([text_token], dtype=torch.int32)
+
     # logger.info(text_token.shape)
     text_token_len = text_token.shape[1]
     return text_token, text_token_len
 
 
 def load_wav(wav, target_sr, min_sr=16000):
-    # logger.info(type(wav))
     if not isinstance(wav, tuple):
-        speech, sample_rate = librosa.load(wav)
+        speech, sample_rate = torchaudio.load(wav, backend="soundfile")
     else:
         speech, sample_rate = wav
-        speech = speech
+        if isinstance(speech, np.ndarray):
+            speech = torch.tensor([speech], dtype=torch.float32)
 
     if sample_rate != target_sr:
         assert sample_rate >= min_sr, f"wav sample rate {sample_rate} must be greater than {target_sr}"
-        speech = librosa.resample(speech, orig_sr=sample_rate, target_sr=target_sr)
-
-    speech = torch.tensor([speech], dtype=torch.float32)
-    # logger.info(type(speech))
+        speech = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=target_sr)(speech)
+    speech = speech.to(dtype=torch.float32)
     return speech
 
 
 def _extract_speech_feat(prompt_wav, feat_extractor, device):
     speech = load_wav(prompt_wav, 24000)
+    logger.info(f"speech {speech.mean()} {speech.max()} {speech.min()} {speech.std()}")
+    logger.info(f"{speech}")
     speech_feat = feat_extractor(speech).squeeze(dim=0).transpose(0, 1).to(device)
+    print(speech_feat)
     speech_feat = speech_feat.unsqueeze(dim=0)
     speech_feat_len = torch.tensor([speech_feat.shape[1]], dtype=torch.int32).to(device)
+    logger.info(f"{speech_feat} {speech_feat_len}")
     return speech_feat, speech_feat_len
 
 
 def _extract_speech_token(prompt_wav, speech_tokenizer_session, device):
     speech = load_wav(prompt_wav, 16000)
     assert speech.shape[1] / 16000 <= 30, "do not support extract speech token for audio longer than 30s"
-
     feat = whisper.log_mel_spectrogram(speech, n_mels=128)
     speech_token = (
         speech_tokenizer_session.run(
@@ -370,13 +375,15 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         if audio is None:
             audio = mm_data.get("audios")
             if audio is not None:
-                # logger.info(f"audios : {audio}")
-                audio = audio[0], 24000
+                logger.info(f"audios : {audio}")
+                audio = audio[0], config.target_sr
 
         text_token, text_token_len = extract_text_token(prompt, self.tokenizer, config.allowed_special)
         if audio is None:
             # Text-only path for profiling/cache
             return BatchFeature({"input_ids": text_token, "input_len": [text_token_len]})
+        print("audio shape")
+        logger.info(audio[0].shape)
 
         prompt_text = mm_kwargs.get("prompt_text")
         ## Unsure how to pass prompt text for profiling'
@@ -408,19 +415,6 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
             int(text_token_len),
             int(input_len),
         )
-        try:
-            os.makedirs("/mnt/d/testing", exist_ok=True)
-            with open("/mnt/d/testing/cosyvoice_len.json", "w", encoding="utf-8") as f:
-                json.dump(
-                    {
-                        "text_len": int(text_token_len),
-                        "prompt_text_len": int(prompt_text_token_len),
-                        "expected_total_len": int(input_len),
-                    },
-                    f,
-                )
-        except Exception:
-            pass
         device = "cpu"
 
         speech_feat, speech_feat_len = _extract_speech_feat(audio, self.feat_extractor, device)
@@ -428,7 +422,7 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         embedding = _extract_spk_embedding(audio, self.campplus_session, device)
 
         # input_ids = input_ids
-        return BatchFeature(
+        ft = BatchFeature(
             {
                 # "tts_prompt_text":[[prompt]], "speech_prompt_text": [[prompt_text]],
                 "input_ids": input_ids,
@@ -443,6 +437,9 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
                 "embedding": embedding,
             }
         )
+
+        logger.info(f"Best FT {ft}")
+        return ft
 
     def _get_mm_fields_config(
         self,
@@ -473,12 +470,8 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         hf_processor_mm_kwargs: Mapping[str, object],
         tokenization_kwargs: Mapping[str, object],
     ) -> bool:
-        # Weird but here prompt_text is actual text
-        # logger.info("hf_processor_implies_updates")
-        # logger.info(f"text {prompt_text}")
-        # logger.info(f"mm_items {mm_items}")
-        # logger.info(f"hf_processor_mm_kwargs {hf_processor_mm_kwargs}")
-        # logger.info(f"tokenization_kwargs {tokenization_kwargs}")
+        # Weird but here prompt_text is actual text which is referred
+        # as prompt at other places
         return False
 
     def _get_prompt_updates(
@@ -490,26 +483,8 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         """
         TODO: Think if this is the correct?
         """
-        # out_mm_data = out_mm_kwargs.get_data()
-        # logger.info(f"mm_items {mm_items}")
-        # logger.info(f"hf_processor_mm_kwargs {hf_processor_mm_kwargs}")
-        # logger.info(f"out_mm_kwargs {out_mm_kwargs.get_data().keys()}")
-
-        # def replacement(item_idx: int):
-        #     return [1]
-
-        # return [
-        #     PromptReplacement(
-        #         modality="audio",
-        #         target=PromptIndexTargets.start(),
-        #         replacement=replacement
-        #     )
-        # ]
-
-        # return []
 
         def insertion(item_idx):
-            # length = mm_items.get("audio", AudioProcessorItems).get_audio_length(item_idx)
             return [1, 1]
 
         return [
@@ -524,7 +499,7 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         """For audio you need to define target_sr;
         so need to create this data parser to avoid those errors
         """
-        return MultiModalDataParser(target_sr=16000)
+        return MultiModalDataParser(target_sr=self.info.ctx.get_hf_config().target_sr)
 
 
 class CosyVoiceDummyInputsBuilder(BaseDummyInputsBuilder[CosyVoiceMultiModalProcessingInfo]):
@@ -578,8 +553,8 @@ class CosyVoiceModel(
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
-        self.have_multimodal_outputs = True
         self.config = vllm_config.model_config.hf_config
+        self.have_multimodal_outputs = True
         self.model_stage = vllm_config.model_config.model_stage
         self.model_dir = vllm_config.model_config.model
         self.model = None
@@ -845,6 +820,8 @@ class CosyVoiceModel(
             token_len = prompt_token_len + token_len
             mask = (~_make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
             vocab_size = self.model.input_embedding.num_embeddings
+            # , max=vocab_size - 1
+            # token = self.model.input_embedding(torch.clamp(token, min=0)) * mask
             token = self.model.input_embedding(torch.clamp(token, min=0, max=vocab_size - 1)) * mask
 
             # text encode

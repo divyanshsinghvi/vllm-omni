@@ -1,3 +1,4 @@
+import json
 import os
 from collections.abc import Iterable, Mapping, Sequence
 from functools import partial
@@ -51,6 +52,8 @@ class CosyVoiceConfig(PretrainedConfig):
         self.spk_embed_dim = 192
         self.token_frame_rate = 25
         self.token_mel_ratio = 2
+        self.min_token_text_ratio = 2
+        self.max_token_text_ratio = 20
         self.allowed_special = "all"
         self.skip_special_tokens = True
         self.feat_extractor = {
@@ -299,6 +302,16 @@ def _fade_in_out(fade_in_mel, fade_out_mel, window):
     return fade_in_mel.to(device)
 
 
+def _compute_min_max_len(
+    text_len: torch.Tensor,
+    prompt_text_len: torch.Tensor,
+    min_token_text_ratio: float,
+    max_token_text_ratio: float,
+) -> tuple[int, int]:
+    base_len = text_len - prompt_text_len
+    return int(base_len * min_token_text_ratio), int(base_len * max_token_text_ratio)
+
+
 ###############################
 
 """
@@ -324,6 +337,7 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         """
         from cosyvoice.tokenizer.tokenizer import get_qwen_tokenizer
 
+        # logger.info(f"{prompt} {mm_data} {mm_kwargs} {tok_kwargs}")
         config = self.info.ctx.get_hf_config()
         # mc = self.info.ctx.model_config
         # logger.info("HF processor stage_id=%s model_stage=%s", mc.stage_id, mc.model_stage)
@@ -350,10 +364,6 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
             campplus_full_path, sess_options=option, providers=["CPUExecutionProvider"]
         )
 
-        # logger.info("Processing inputs in CosyVoiceMultiModalProcessor")
-        # logger.info(f"mm_data keys: {list(mm_data.keys())}")
-        # logger.info(f"mm_kwargs keys: {list(mm_kwargs.keys())}")
-        # logger.info(f"prompt: {prompt}")
         audio = mm_data.get("audio", None)
 
         # TODO: See where audios is coming from
@@ -388,17 +398,42 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
             prompt_text_token,
             prompt_text_token_len,
         )
+        logger.info(
+            "cosyvoice _call_hf_processor: prompt_text_token=%s text_token=%s input_ids=%s "
+            "prompt_text_len=%s text_len=%s input_len=%s",
+            prompt_text_token.tolist(),
+            text_token.tolist(),
+            input_ids.tolist(),
+            int(prompt_text_token_len),
+            int(text_token_len),
+            int(input_len),
+        )
+        try:
+            os.makedirs("/mnt/d/testing", exist_ok=True)
+            with open("/mnt/d/testing/cosyvoice_len.json", "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "text_len": int(text_token_len),
+                        "prompt_text_len": int(prompt_text_token_len),
+                        "expected_total_len": int(input_len),
+                    },
+                    f,
+                )
+        except Exception:
+            pass
         device = "cpu"
 
         speech_feat, speech_feat_len = _extract_speech_feat(audio, self.feat_extractor, device)
         speech_token, speech_token_len = _extract_speech_token(audio, self.speech_tokenizer, device)
         embedding = _extract_spk_embedding(audio, self.campplus_session, device)
 
+        # input_ids = input_ids
         return BatchFeature(
             {
                 # "tts_prompt_text":[[prompt]], "speech_prompt_text": [[prompt_text]],
                 "input_ids": input_ids,
                 "input_len": [input_len],
+                "text_len": [text_token_len],
                 "prompt_text_token": prompt_text_token,
                 "prompt_text_len": [prompt_text_token_len],
                 "speech_feat": speech_feat,
@@ -420,6 +455,8 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         return {
             # "tts_prompt_text": MultiModalFieldConfig.batched("audio"),
             # "speech_prompt_text": MultiModalFieldConfig.batched("audio"),
+            "input_len": MultiModalFieldConfig.batched("audio"),
+            "text_len": MultiModalFieldConfig.batched("audio"),
             "prompt_text_len": MultiModalFieldConfig.batched("audio"),
             "prompt_text_token": MultiModalFieldConfig.batched("audio"),
             "speech_feat": MultiModalFieldConfig.batched("audio"),
@@ -453,11 +490,24 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         """
         TODO: Think if this is the correct?
         """
-
-        # return []
+        # out_mm_data = out_mm_kwargs.get_data()
         # logger.info(f"mm_items {mm_items}")
         # logger.info(f"hf_processor_mm_kwargs {hf_processor_mm_kwargs}")
-        # logger.info(f"out_mm_kwargs {out_mm_kwargs.get_data()}")
+        # logger.info(f"out_mm_kwargs {out_mm_kwargs.get_data().keys()}")
+
+        # def replacement(item_idx: int):
+        #     return [1]
+
+        # return [
+        #     PromptReplacement(
+        #         modality="audio",
+        #         target=PromptIndexTargets.start(),
+        #         replacement=replacement
+        #     )
+        # ]
+
+        # return []
+
         def insertion(item_idx):
             # length = mm_items.get("audio", AudioProcessorItems).get_audio_length(item_idx)
             return [1, 1]
@@ -644,6 +694,7 @@ class CosyVoiceModel(
     def embed_multimodal(self, **kwargs: object) -> torch.Tensor:
         # logger.info(f"embed_multimodal kwargs {kwargs}")
         if self.model_stage == "text_speech_lm":
+            logger.info(f"-------------------- {kwargs['speech_token']}")
             self.speech_token = kwargs["speech_token"]
             self.embedding = kwargs["embedding"]
             # self.prompt_text_token = kwargs["prompt_text_token"]
@@ -663,14 +714,13 @@ class CosyVoiceModel(
         # logger.info(f"is_multimodal: {is_multimodal}")
         # logger.info(f"input_ids {input_ids}")
         if self.model_stage == "text_speech_lm":
-            # logger.info("Embedding input ids for text to speech LM stage.")
             embed_tokens = self.model.llm.model.model.embed_tokens(input_ids)
-            sos = self.model.speech_embedding.weight[self.model.sos].reshape(1, -1)
-            task_id = self.model.speech_embedding.weight[self.model.task_id].reshape(1, -1)
-            # logger.info(f"sos: {sos.shape} task_id {task_id.shape} embed_tokens
-            # {embed_tokens.shape} input_ids {input_ids.shape}")
 
+            # TODO: This is also same random trick because I couldn't figure out how to
+            # add it in processor.
             if len(input_ids) >= 2 and input_ids[0] == 1 and input_ids[1] == 1:
+                sos = self.model.speech_embedding.weight[self.model.sos].reshape(1, -1)
+                task_id = self.model.speech_embedding.weight[self.model.task_id].reshape(1, -1)
                 embed_tokens = torch.cat([sos, embed_tokens[2:], task_id], dim=0)
             return embed_tokens
         elif self.model_stage == "chunk_aware_flow_matching":
@@ -695,15 +745,47 @@ class CosyVoiceModel(
         additional_information: dict[str, object] | None = None,
         **kwargs: object,
     ) -> OmniOutput:
-        # if len(kwargs) > 0:
-        #     logger.info(f"Forward pass for text to speech LM stage (cuda graph capture) {self.model_stage}")
-        #     logger.info(f"input_ids {input_ids}")
-        #     logger.info(f"positions {positions} {positions.shape}")
-        #     logger.info(f"intermediate_tensors {intermediate_tensors}")
-        #     logger.info(f"inputs_embeds {inputs_embeds.shape}")
-        # logger.info(f"kwargs {kwargs['speech_token'].shape}")
-        # logger.info(f"model_stage {self.model_stage}")
         if self.model_stage == "text_speech_lm":
+            # logger.info(f"Forward pass for text {self.model_stage}")
+            # logger.info(f"input_ids {input_ids}")
+            # logger.info(f"positions {positions} {positions.shape}")
+            # logger.info(f"intermediate_tensors {intermediate_tensors}")
+            # logger.info(f"inputs_embeds {inputs_embeds.shape if inputs_embeds
+            # is not None else None} ")
+            # logger.info(f"kwargs {kwargs.keys()}")
+            # logger.info(f"kwargs {kwargs['runtime_additional_information'] if
+            # 'runtime_additional_information' in kwargs else None}")
+            # logger.info(f"model_stage {self.model_stage}")
+            # logger.info(f"additional_information {additional_information}")
+            if input_ids is not None:
+                #### TODO: This is random trick I added because I didn't know how to pass it without
+                # adding any prompt updates
+                if len(input_ids) > 2 and input_ids.tolist()[:2] == [1, 1]:
+                    input_ids = input_ids[2:]
+                    inputs_embeds = self.embed_input_ids(input_ids)
+                    prompt_speech_token = kwargs.get("speech_token")
+                    print(f"kwargs {kwargs.keys()}")
+                    input_len = kwargs.get("input_len")
+                    logger.info(f"input_len {input_len.shape}")
+                    prompt_text_len = kwargs.get("prompt_text_len")
+                    self.min_len, self.max_len = _compute_min_max_len(
+                        input_len[0],
+                        prompt_text_len[0],
+                        self.config.min_token_text_ratio,
+                        self.config.max_token_text_ratio,
+                    )
+
+                    print(input_ids.shape)
+                    pstoken = prompt_speech_token[0][0]
+                    prompt_speech_token_emb = self.model.speech_embedding(pstoken)
+                    print(prompt_speech_token_emb.shape)
+                    print(inputs_embeds.shape)
+                    logger.info(
+                        f" {prompt_speech_token.shape} prompt_speech_token {prompt_speech_token} "
+                        f"prompt_speech_token_emb {prompt_speech_token_emb}"
+                    )
+                    inputs_embeds = torch.concat([inputs_embeds, prompt_speech_token_emb], dim=0)
+
             if inputs_embeds is None:
                 inputs_embeds = self.embed_input_ids(input_ids)
             # Ensure [B, T, C]

@@ -21,6 +21,7 @@ stage_args:
       disable_hybrid_kv_cache_manager: true
       enable_prefix_caching: false
       enforce_eager: true
+      mm_processor_cache_gb: 0
       # limit_mm_per_prompt:
         # audio: 1
       skip_mm_profiling: true

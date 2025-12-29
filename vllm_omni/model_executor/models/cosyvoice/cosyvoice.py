@@ -219,6 +219,7 @@ def load_wav(wav, target_sr, min_sr=16000):
     if sample_rate != target_sr:
         assert sample_rate >= min_sr, f"wav sample rate {sample_rate} must be greater than {target_sr}"
         speech = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=target_sr)(speech)
+
     speech = speech.to(dtype=torch.float32)
     return speech
 
@@ -228,10 +229,8 @@ def _extract_speech_feat(prompt_wav, feat_extractor, device):
     logger.info(f"speech {speech.mean()} {speech.max()} {speech.min()} {speech.std()}")
     logger.info(f"{speech}")
     speech_feat = feat_extractor(speech).squeeze(dim=0).transpose(0, 1).to(device)
-    print(speech_feat)
     speech_feat = speech_feat.unsqueeze(dim=0)
     speech_feat_len = torch.tensor([speech_feat.shape[1]], dtype=torch.int32).to(device)
-    logger.info(f"{speech_feat} {speech_feat_len}")
     return speech_feat, speech_feat_len
 
 
@@ -257,14 +256,21 @@ def _extract_speech_token(prompt_wav, speech_tokenizer_session, device):
 
 def _extract_spk_embedding(prompt_wav, campplus_session, device):
     speech = load_wav(prompt_wav, 16000)
+    print(f"speech {speech} {speech.shape} {speech.mean()} {speech.min()} {speech.std()} {speech.max()}")
     feat = kaldi.fbank(speech, num_mel_bins=80, dither=0, sample_frequency=16000)
     feat = feat - feat.mean(dim=0, keepdim=True)
+    print(f"feat {feat} {feat.shape} {feat.mean()} {feat.min()} {feat.std()} {feat.max()}")
     embedding = (
         campplus_session.run(None, {campplus_session.get_inputs()[0].name: feat.unsqueeze(dim=0).cpu().numpy()})[0]
         .flatten()
         .tolist()
     )
+    print(f"embedding {embedding} ")
     embedding = torch.tensor([embedding]).to(device)
+    print(
+        f"embedding {embedding} {embedding.shape} {embedding.mean()} "
+        f"{embedding.min()} {embedding.std()} {embedding.max()}"
+    )
     return embedding
 
 
@@ -342,6 +348,7 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         """
         from cosyvoice.tokenizer.tokenizer import get_qwen_tokenizer
 
+        logger.info(mm_data.keys())
         # logger.info(f"{prompt} {mm_data} {mm_kwargs} {tok_kwargs}")
         config = self.info.ctx.get_hf_config()
         # mc = self.info.ctx.model_config
@@ -354,6 +361,8 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         )
 
         option = onnxruntime.SessionOptions()
+        option.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
+        option.intra_op_num_threads = 1
         self.speech_tokenizer = onnxruntime.InferenceSession(
             os.path.join(model_dir, config.speech_tokenizer_path),
             sess_options=option,
@@ -417,8 +426,15 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         )
         device = "cpu"
 
-        speech_feat, speech_feat_len = _extract_speech_feat(audio, self.feat_extractor, device)
         speech_token, speech_token_len = _extract_speech_token(audio, self.speech_tokenizer, device)
+        speech_feat, speech_feat_len = _extract_speech_feat(audio, self.feat_extractor, device)
+
+        if config.sample_rate == 24000:
+            # cosyvoice2, force speech_feat % speech_token = 2
+            token_len = min(int(speech_feat.shape[1] / 2), speech_token.shape[1])
+            speech_feat, speech_feat_len[:] = speech_feat[:, : 2 * token_len], 2 * token_len
+            speech_token, speech_token_len[:] = speech_token[:, :token_len], token_len
+
         embedding = _extract_spk_embedding(audio, self.campplus_session, device)
 
         # input_ids = input_ids
@@ -437,7 +453,6 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
                 "embedding": embedding,
             }
         )
-
         logger.info(f"Best FT {ft}")
         return ft
 
@@ -483,16 +498,32 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         """
         TODO: Think if this is the correct?
         """
+        logger.info("prompt updates")
+        # logger.info(f"f{out_mm_kwargs['audio']}")
+        # logger.info(f"f{out_mm_kwargs['audio'][0].keys()}")
 
-        def insertion(item_idx):
-            return [1, 1]
+        # def insertion_start(item_idx):
+        #     # sos
+        #     return [1]
+
+        def insertion_end(item_idx):
+            # sos + task + audio token ... ideally this needs to be split into
+            # two start and end but somehow I couldn't pass two of these
+            # wutg target .start() and .end()
+            token_len = out_mm_kwargs["audio"][0]["speech_token_len"].data[0].item()
+            return [1] * (1 + 1 + token_len)
 
         return [
             PromptInsertion(
                 modality="audio",
                 target=PromptIndexTargets.start(),
-                insertion=insertion,
-            )
+                insertion=insertion_end,
+            ),
+            # PromptInsertion(
+            #     modality="audio",
+            #     target=PromptIndexTargets.start(),
+            #     insertion=insertion_start
+            # )
         ]
 
     def _get_data_parser(self) -> MultiModalDataParser:
@@ -532,9 +563,6 @@ class CosyVoiceDummyInputsBuilder(BaseDummyInputsBuilder[CosyVoiceMultiModalProc
         self, seq_len: int, mm_counts: Mapping[str, int], mm_options: Mapping[str, BaseDummyOptions] | None = None
     ) -> ProcessorInputs:
         inputs = super().get_dummy_processor_inputs(seq_len, mm_counts, mm_options)
-        # logger.info(f"mm_counts: {mm_counts}")
-        # logger.info(f"seq_len: {seq_len}")
-        # logger.info(f"mm_options: {mm_options}")
         inputs.hf_processor_mm_kwargs = {"prompt_text": "Testing my voices. Why should I not?"}
         return inputs
 
@@ -564,7 +592,7 @@ class CosyVoiceModel(
             from cosyvoice.utils.common import ras_sampling
 
             # os.path.join(model_dir,
-            llm = Qwen2Encoder(os.path.join(self.model_dir, self.config.llm["llm"]["pretrain_path"]))
+            llm = Qwen2Encoder(os.path.join(self.model_dir, self.config.llm["llm"]["pretrain_path"])).eval()
             self.text_speech_lm_model = CosyVoice3LM(
                 llm_input_size=self.config.llm["llm_input_size"],
                 llm_output_size=self.config.llm["llm_output_size"],
@@ -574,7 +602,7 @@ class CosyVoiceModel(
                 length_normalized_loss=self.config.llm["length_normalized_loss"],
                 lsm_weight=self.config.llm["lsm_weight"],
                 mix_ratio=self.config.llm["mix_ratio"],
-            )
+            ).eval()
             self.model = self.text_speech_lm_model
         elif self.model_stage == "chunk_aware_flow_matching":
             # Initialize chunk aware flow matching stage
@@ -661,7 +689,14 @@ class CosyVoiceModel(
         if isinstance(hidden_states, OmniOutput):
             hidden_states = hidden_states.text_hidden_states
         if self.model_stage == "text_speech_lm":
+            print(hidden_states.dim())
+            # logger.info(f"hs {hidden_states}")
+            logger.info(f"hs {hidden_states[-1]}")
+            # hidden_states = hidden_states.unsqueeze(0)
             logits = self.model.llm_decoder(hidden_states)
+            logger.info(f"logits {logits.log_softmax(dim=-1)}")
+            logger.info(f"{logits.shape}")
+            logger.info(f"argmax logits {logits.argmax()}")
             return logits
         else:
             raise RuntimeError(f"embed_input_ids is only valid for {self.model_stage}.")
@@ -672,9 +707,7 @@ class CosyVoiceModel(
             logger.info(f"-------------------- {kwargs['speech_token']}")
             self.speech_token = kwargs["speech_token"]
             self.embedding = kwargs["embedding"]
-            # self.prompt_text_token = kwargs["prompt_text_token"]
             self.speech_feat = kwargs["speech_feat"]
-            # logger.info(f"tokens {self.speech_token.shape}")
             return self.speech_token
         else:
             raise RuntimeError(f"embed_input_ids is only valid for {self.model_stage}.")
@@ -685,30 +718,32 @@ class CosyVoiceModel(
         multimodal_embeddings=None,
         is_multimodal=None,
     ) -> torch.Tensor:
-        # logger.info(f"multimodal_embeddings: {multimodal_embeddings}")
-        # logger.info(f"is_multimodal: {is_multimodal}")
-        # logger.info(f"input_ids {input_ids}")
         if self.model_stage == "text_speech_lm":
-            embed_tokens = self.model.llm.model.model.embed_tokens(input_ids)
-
-            # TODO: This is also same random trick because I couldn't figure out how to
-            # add it in processor.
-            if len(input_ids) >= 2 and input_ids[0] == 1 and input_ids[1] == 1:
+            logger.info(f"{is_multimodal} {any(is_multimodal)} {is_multimodal is not None}")
+            if is_multimodal is not None and any(is_multimodal):
+                logger.info(f"multimodal_embeddings {multimodal_embeddings}")
+                embed_tokens = self.model.llm.model.model.embed_tokens(input_ids)
+                logger.info(f"embed_toknes {embed_tokens.shape}")
                 sos = self.model.speech_embedding.weight[self.model.sos].reshape(1, -1)
                 task_id = self.model.speech_embedding.weight[self.model.task_id].reshape(1, -1)
-                embed_tokens = torch.cat([sos, embed_tokens[2:], task_id], dim=0)
+                pstoken = multimodal_embeddings[0][0]
+                pstoken_len = len(pstoken)
+                logger.info(f"pstoken {pstoken}")
+                prompt_speech_token_emb = self.model.speech_embedding(pstoken)
+                embed_tokens = torch.cat(
+                    [sos, embed_tokens[2 + pstoken_len :], task_id, prompt_speech_token_emb], dim=0
+                )
+                logger.info(f"embed_toknes {embed_tokens.shape}")
+            else:
+                embed_tokens = self.model.speech_embedding.weight[input_ids]
             return embed_tokens
         elif self.model_stage == "chunk_aware_flow_matching":
             assert input_ids.dim() == 1
-            # logger.info(f"input_ids: {input_ids} multi emb {multimodal_embeddings}")
-            # logger.info(f"is_multimodal: {is_multimodal}")
             hidden = int(self.config.hidden_size)
             return torch.zeros(
                 (input_ids.shape[0], hidden),
             )
         else:
-            # logger.info(f"input_ids: {input_ids} multi emb {multimodal_embeddings}")
-            # logger.info(f"is_multimodal: {is_multimodal}")
             raise RuntimeError(f"embed_input_ids is not valid for {self.model_stage}.")
 
     def forward(
@@ -722,55 +757,33 @@ class CosyVoiceModel(
     ) -> OmniOutput:
         if self.model_stage == "text_speech_lm":
             # logger.info(f"Forward pass for text {self.model_stage}")
-            # logger.info(f"input_ids {input_ids}")
+            logger.info(f"input_ids {input_ids}")
             # logger.info(f"positions {positions} {positions.shape}")
             # logger.info(f"intermediate_tensors {intermediate_tensors}")
-            # logger.info(f"inputs_embeds {inputs_embeds.shape if inputs_embeds
-            # is not None else None} ")
+            logger.info(f"inputs_embeds {inputs_embeds.shape if inputs_embeds is not None else None}")
             # logger.info(f"kwargs {kwargs.keys()}")
             # logger.info(f"kwargs {kwargs['runtime_additional_information'] if
             # 'runtime_additional_information' in kwargs else None}")
             # logger.info(f"model_stage {self.model_stage}")
             # logger.info(f"additional_information {additional_information}")
-            if input_ids is not None:
-                #### TODO: This is random trick I added because I didn't know how to pass it without
-                # adding any prompt updates
-                if len(input_ids) > 2 and input_ids.tolist()[:2] == [1, 1]:
-                    input_ids = input_ids[2:]
-                    inputs_embeds = self.embed_input_ids(input_ids)
-                    prompt_speech_token = kwargs.get("speech_token")
-                    print(f"kwargs {kwargs.keys()}")
-                    input_len = kwargs.get("input_len")
-                    logger.info(f"input_len {input_len.shape}")
-                    prompt_text_len = kwargs.get("prompt_text_len")
-                    self.min_len, self.max_len = _compute_min_max_len(
-                        input_len[0],
-                        prompt_text_len[0],
-                        self.config.min_token_text_ratio,
-                        self.config.max_token_text_ratio,
-                    )
 
-                    print(input_ids.shape)
-                    pstoken = prompt_speech_token[0][0]
-                    prompt_speech_token_emb = self.model.speech_embedding(pstoken)
-                    print(prompt_speech_token_emb.shape)
-                    print(inputs_embeds.shape)
-                    logger.info(
-                        f" {prompt_speech_token.shape} prompt_speech_token {prompt_speech_token} "
-                        f"prompt_speech_token_emb {prompt_speech_token_emb}"
-                    )
-                    inputs_embeds = torch.concat([inputs_embeds, prompt_speech_token_emb], dim=0)
-
-            if inputs_embeds is None:
+            if inputs_embeds is None and input_ids is not None:
                 inputs_embeds = self.embed_input_ids(input_ids)
+                raise Exception(f"inputs_embeds {input_ids} {inputs_embeds}")
+
             # Ensure [B, T, C]
             if inputs_embeds.dim() == 2:
                 inputs_embeds = inputs_embeds.unsqueeze(0)
             batch, seq_len, _ = inputs_embeds.shape
+            print(inputs_embeds.shape)
             seq_lens = torch.full((batch,), seq_len, dtype=torch.int32, device=inputs_embeds.device)
             hidden_states, _ = self.model.llm(inputs_embeds, seq_lens)
-            # logger.info(f"hidden_states {hidden_states.shape}")
             hidden_states = hidden_states.squeeze(0)
+            logger.info(f"hidden_states {hidden_states.dtype} {inputs_embeds.dtype}")
+            logger.info(f"hidden_states {hidden_states.device} {inputs_embeds.device}")
+            logger.info(f"hidden_states {hidden_states.shape}")
+            logger.info(f"hidden_states {hidden_states[-1]}")
+            logger.info(f"hidden_states {hidden_states[-1].mean()}")
 
             # logger.info(f"kwargs {kwargs}")
             multimodal_outputs = {}

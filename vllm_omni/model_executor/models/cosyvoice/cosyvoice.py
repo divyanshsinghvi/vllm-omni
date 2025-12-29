@@ -68,6 +68,7 @@ class CosyVoiceConfig(PretrainedConfig):
             "fmax": None,
             "center": False,
         }
+        self.speculative_config = None
         self.qwen_pretrain_path = "CosyVoice-BlankEN"
         self.campplus_onxx_path = "campplus.onnx"
         self.speech_tokenizer_path = "speech_tokenizer_v3.onnx"
@@ -592,7 +593,7 @@ class CosyVoiceModel(
             from cosyvoice.utils.common import ras_sampling
 
             # os.path.join(model_dir,
-            llm = Qwen2Encoder(os.path.join(self.model_dir, self.config.llm["llm"]["pretrain_path"])).eval()
+            llm = Qwen2Encoder(os.path.join(self.model_dir, self.config.llm["llm"]["pretrain_path"]))  # .eval()
             self.text_speech_lm_model = CosyVoice3LM(
                 llm_input_size=self.config.llm["llm_input_size"],
                 llm_output_size=self.config.llm["llm_output_size"],
@@ -602,7 +603,8 @@ class CosyVoiceModel(
                 length_normalized_loss=self.config.llm["length_normalized_loss"],
                 lsm_weight=self.config.llm["lsm_weight"],
                 mix_ratio=self.config.llm["mix_ratio"],
-            ).eval()
+            )  # .eval()
+            self.llm_cache = None
             self.model = self.text_speech_lm_model
         elif self.model_stage == "chunk_aware_flow_matching":
             # Initialize chunk aware flow matching stage
@@ -689,14 +691,21 @@ class CosyVoiceModel(
         if isinstance(hidden_states, OmniOutput):
             hidden_states = hidden_states.text_hidden_states
         if self.model_stage == "text_speech_lm":
-            print(hidden_states.dim())
+            print(hidden_states.shape)
             # logger.info(f"hs {hidden_states}")
             logger.info(f"hs {hidden_states[-1]}")
-            # hidden_states = hidden_states.unsqueeze(0)
             logits = self.model.llm_decoder(hidden_states)
             logger.info(f"logits {logits.log_softmax(dim=-1)}")
             logger.info(f"{logits.shape}")
             logger.info(f"argmax logits {logits.argmax()}")
+            vocab_size = self.config.vocab_size
+            pad_size = vocab_size - logits.size(-1)
+            pad_shape = logits.shape[:-1] + (pad_size,)
+            pad = logits.new_full(pad_shape, float("-inf"))
+            logits = torch.cat([logits, pad], dim=-1)
+            logger.info(f"{logits.shape}")
+            logger.info(f"argmax logits {logits.argmax()}")
+
             return logits
         else:
             raise RuntimeError(f"embed_input_ids is only valid for {self.model_stage}.")
@@ -736,6 +745,8 @@ class CosyVoiceModel(
                 logger.info(f"embed_toknes {embed_tokens.shape}")
             else:
                 embed_tokens = self.model.speech_embedding.weight[input_ids]
+                logger.info("starting here")
+                logger.info(f"{input_ids}\n{embed_tokens}")
             return embed_tokens
         elif self.model_stage == "chunk_aware_flow_matching":
             assert input_ids.dim() == 1
@@ -775,15 +786,22 @@ class CosyVoiceModel(
             if inputs_embeds.dim() == 2:
                 inputs_embeds = inputs_embeds.unsqueeze(0)
             batch, seq_len, _ = inputs_embeds.shape
-            print(inputs_embeds.shape)
-            seq_lens = torch.full((batch,), seq_len, dtype=torch.int32, device=inputs_embeds.device)
-            hidden_states, _ = self.model.llm(inputs_embeds, seq_lens)
+            if seq_len > 1:
+                self.llm_cache = None
+            # hidden_states, _ = self.model.llm(inputs_embeds, seq_lens)
+            # hidden_states, self.llm_cache = self.model.llm.forward_correct(inputs_embeds, seq_lens, self.llm_cache)
+
+            if self.llm_cache is not None:
+                seq_len += self.llm_cache[0][0].shape[2]
+            masks = torch.tril(torch.ones((1, seq_len, seq_len), device=inputs_embeds.device)).to(torch.bool)
+            hidden_states, self.llm_cache = self.model.llm.forward_one_step(inputs_embeds, masks, cache=self.llm_cache)
+            ## TODO Shift to vllm attention backed
             hidden_states = hidden_states.squeeze(0)
-            logger.info(f"hidden_states {hidden_states.dtype} {inputs_embeds.dtype}")
-            logger.info(f"hidden_states {hidden_states.device} {inputs_embeds.device}")
-            logger.info(f"hidden_states {hidden_states.shape}")
-            logger.info(f"hidden_states {hidden_states[-1]}")
-            logger.info(f"hidden_states {hidden_states[-1].mean()}")
+            # logger.info(f"hidden_states {hidden_states.dtype} {inputs_embeds.dtype}")
+            # logger.info(f"hidden_states {hidden_states.device} {inputs_embeds.device}")
+            # logger.info(f"hidden_states {hidden_states.shape}")
+            # logger.info(f"hidden_states {hidden_states[-1]}")
+            # logger.info(f"hidden_states {hidden_states[-1].mean()}")
 
             # logger.info(f"kwargs {kwargs}")
             multimodal_outputs = {}

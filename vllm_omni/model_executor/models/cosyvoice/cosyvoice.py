@@ -960,5 +960,12 @@ class CosyVoiceModel(
             device = next(self.parameters()).device
             self.model.load_state_dict(torch.load(flow_weight_path, map_location=device), strict=True)
             self.model.to(device).eval()
+
+            hift_weight_path = os.path.join(self.model_dir, "hift.pt")
+            hift_state_dict = {
+                k.replace("generator.", ""): v for k, v in torch.load(hift_weight_path, map_location=device).items()
+            }
+            self.hift.load_state_dict(hift_state_dict, strict=True)
+            self.hift.to(device).eval()
         else:
             raise ValueError("Stop it!")

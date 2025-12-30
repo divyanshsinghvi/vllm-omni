@@ -410,10 +410,6 @@ class CosyVoiceModel(
             self.mel_cache_len = 20
             self.source_cache_len = int(self.mel_cache_len * 256)
             self.speech_window = np.hamming(2 * self.source_cache_len)
-            # self.mel_overlap_dict: dict[str, torch.Tensor] = {}
-            # self.flow_cache_dict: dict[str, torch.Tensor] = {}
-            # self.hift_cache_dict: dict[str, dict[str, torch.Tensor] | None] = {}
-            # self.model = self.hift
         else:
             raise ValueError(f"Model stage not supported {self.model_stage}")
 

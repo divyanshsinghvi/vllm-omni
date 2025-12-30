@@ -36,13 +36,7 @@ def text2flow(
     prompt_payload = prompt[0]
     if prompt_payload is None:
         raise RuntimeError(f"Missing prompt payload for {source_output.request_id}")
-    # print("prompt payload")
-    # print(prompt_payload)
 
-    # print("here")
-    # print("--------------------------")
-    # print(source_output)
-    # print(source_output.outputs[0])
     multi_modal_data = source_output.multimodal_output
     output_ids = source_output.outputs[0].token_ids
     prefix_ids = source_output.prompt_token_ids

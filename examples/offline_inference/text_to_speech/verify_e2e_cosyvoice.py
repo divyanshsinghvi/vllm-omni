@@ -71,11 +71,6 @@ def run_e2e():
     else:
         audio_data = AudioAsset("mary_had_lamb").audio_and_sample_rate
 
-    print("audio data")
-    print(audio_data)
-    print(type(audio_data[0]))
-    print(audio_data[0].shape)
-
     prompts = {
         "prompt": args.prompt,
         "multi_modal_data": {

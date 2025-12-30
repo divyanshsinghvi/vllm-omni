@@ -508,9 +508,9 @@ class CosyVoiceModel(
             self.mel_cache_len = 20
             self.source_cache_len = int(self.mel_cache_len * 256)
             self.speech_window = np.hamming(2 * self.source_cache_len)
-            self.mel_overlap_dict: dict[str, torch.Tensor] = {}
-            self.flow_cache_dict: dict[str, torch.Tensor] = {}
-            self.hift_cache_dict: dict[str, dict[str, torch.Tensor] | None] = {}
+            # self.mel_overlap_dict: dict[str, torch.Tensor] = {}
+            # self.flow_cache_dict: dict[str, torch.Tensor] = {}
+            # self.hift_cache_dict: dict[str, dict[str, torch.Tensor] | None] = {}
             # self.model = self.hift
         else:
             raise ValueError(f"Model stage not supported {self.model_stage}")
@@ -585,7 +585,6 @@ class CosyVoiceModel(
     ) -> OmniOutput:
         if self.model_stage == "text_speech_lm":
             if inputs_embeds is None and input_ids is not None:
-                inputs_embeds = self.embed_input_ids(input_ids)
                 raise Exception(f"inputs_embeds {input_ids} {inputs_embeds}")
 
             # Ensure [B, T, C]
@@ -620,7 +619,9 @@ class CosyVoiceModel(
             runtime_info = kwargs.get("runtime_additional_information", [])
 
             if not req_ids:
-                return OmniOutput(text_hidden_states=None, multimodal_outputs=None)
+                d = next(self.parameters())
+                dummy_audio = torch.zeros((1, 1, 1), device=d.device, dtype=d.dtype)
+                return OmniOutput(text_hidden_states=None, multimodal_outputs={"audio": dummy_audio})
 
             d = next(self.parameters())
             device, dtype = d.device, d.dtype
@@ -665,12 +666,6 @@ class CosyVoiceModel(
             feat = feat[:, :, mel_len1:]
 
             tts_mel = feat
-
-            req_id = kwargs["request_ids"][0]
-            if req_id not in self.mel_overlap_dict:
-                self.mel_overlap_dict[req_id] = torch.zeros(1, 80, 0, device=device)
-                self.flow_cache_dict[req_id] = torch.zeros(1, 80, 0, 2, device=device)
-                self.hift_cache_dict[req_id] = None
 
             token_offset = 0
             tts_mel = tts_mel[:, :, token_offset * self.model.token_mel_ratio :]

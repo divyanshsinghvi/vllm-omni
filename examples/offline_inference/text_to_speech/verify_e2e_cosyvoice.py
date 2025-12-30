@@ -1,0 +1,169 @@
+import argparse
+import os
+from pathlib import Path
+
+import librosa
+import numpy as np
+import soundfile as sf
+
+# Use Omni entrypoint directly
+from vllm.assets.audio import AudioAsset
+
+from vllm import SamplingParams
+from vllm_omni.entrypoints.omni import Omni
+
+# def create_dummy_audio(path, duration=3.0, sr=24000):
+#     if not os.path.exists(path):
+#         print(f"Creating dummy audio at {path}")
+#         audio = np.random.uniform(-0.1, 0.1, int(sr * duration))
+#         sf.write(path, audio, sr)
+#     return path
+
+
+def run_e2e():
+    parser = argparse.ArgumentParser()
+    # ""FunAudioLLM/Fun-CosyVoice3-0.5B-2512
+    # /mnt/d/vllm_models/local_cosyvoice
+    # /mnt/d/.cache/huggingface/hub/models--FunAudioLLM--CosyVoice2-0.5B/snapshots/7532de4ab5a24a119fbc93fdc27449a329649a4a
+    # /mnt/d/.cache/huggingface/hub/models--FunAudioLLM--Fun-CosyVoice3-0.5B-2512/snapshots/5646a54a6bea9eb1ec64b3ded068fdcf5a65f9ae
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="/mnt/d/.cache/huggingface/hub/models--FunAudioLLM--Fun-CosyVoice3-0.5B-2512/snapshots/5646a54a6bea9eb1ec64b3ded068fdcf5a65f9ae",
+    )
+    # parser.add_argument("--model", type=str, default="/mnt/d/vllm_models/local_cosyvoice")
+    parser.add_argument("--stage-config", type=str, default="vllm_omni/model_executor/stage_configs/cosyvoice.yaml")
+    parser.add_argument("--prompt", type=str, default="Hello, this is a test of the CosyVoice system capability.")
+    parser.add_argument(
+        "--prompt-text",
+        type=str,
+        default="You are a helpful assistant.<|endofprompt|>Testing my voices. Why should I not?",
+    )
+    parser.add_argument("--audio-path", type=str, default="prompt.wav")
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        default="/mnt/d/omni_logs",
+        help="Log file path prefix (e.g., /tmp/omni_logs).",
+    )
+    args = parser.parse_args()
+
+    # Ensure stage config exists
+    if not os.path.exists(args.stage_config):
+        # Fallback to absolute path or check alternative locations
+        alt_path = Path("/home/dsinghvi/code/open_source/vllm-omni") / args.stage_config
+        if alt_path.exists():
+            args.stage_config = str(alt_path)
+        else:
+            print(f"Warning: Stage config {args.stage_config} not found.")
+
+    print(f"Initializing cosyvoice E2E with model={args.model}")
+
+    # Initialize Omni
+    # This spins up the engine(s) based on the stage config
+    # We pass trust_remote_code=True same as Qwen examples
+    omni = Omni(
+        model=args.model,
+        stage_configs_path=args.stage_config,
+        trust_remote_code=True,
+        log_file=args.log_file,
+        # skip_tokenizer_init=True,
+    )
+
+    # Map CosyVoice sampling config into vLLM SamplingParams for stage 0.
+    try:
+        hf_config = omni.instance.stage_list[0].vllm_config.model_config.hf_config
+        sampling_cfg = hf_config.llm["sampling"]
+    except Exception:
+        sampling_cfg = {"top_p": 0.8, "top_k": 25}
+
+    print("Model initialized. Preparing inputs...")
+    if args.audio_path:
+        if not os.path.exists(args.audio_path):
+            raise FileNotFoundError(f"Audio file not found: {args.audio_path}")
+        audio_signal, sr = librosa.load(args.audio_path, sr=24000)
+        audio_data = (audio_signal.astype(np.float32), sr)
+    else:
+        audio_data = AudioAsset("mary_had_lamb").audio_and_sample_rate
+
+    print("audio data")
+    print(audio_data)
+    print(type(audio_data[0]))
+    print(audio_data[0].shape)
+
+    prompts = {
+        "prompt": args.prompt,
+        "multi_modal_data": {
+            "audio": audio_data,
+        },
+        "mm_processor_kwargs": {
+            "prompt_text": args.prompt_text,
+            "sample_rate": audio_data[1],
+        },
+    }
+
+    print(f"Generating for prompt: {args.prompt}")
+
+    # Build SamplingParams for each stage (GPT, S2Mel, Vocoder)
+    gpt_sampling = SamplingParams(
+        temperature=1.0,
+        top_p=sampling_cfg["top_p"],
+        top_k=sampling_cfg["top_k"],
+        repetition_penalty=2.0,
+        max_tokens=128,
+        # allowed_token_ids=list(range(6561+3)),
+        detokenize=False,
+    )
+    s2mel_sampling = SamplingParams(
+        temperature=1.0,
+        top_p=1.0,
+        top_k=-1,
+        repetition_penalty=2.0,
+        max_tokens=128,
+        detokenize=False,
+    )
+    vocoder_sampling = SamplingParams(
+        temperature=0.0,
+        top_p=1.0,
+        top_k=-1,
+        max_tokens=128,
+        detokenize=True,
+    )
+
+    # [preproc_sampling, gpt_sampling, s2mel_sampling, vocoder_sampling]
+    sampling_params_list = [gpt_sampling, s2mel_sampling, vocoder_sampling]
+
+    # Generate (Omni orchestrator requires a per-stage SamplingParams list)
+    outputs = omni.generate(prompts, sampling_params_list=sampling_params_list[:2])
+    print(outputs)
+    # Verify outputs
+    print(f"Received {len(outputs)} outputs.")
+    for i, output in enumerate(outputs):
+        try:
+            ro_list = output.request_output or []
+            if not ro_list:
+                print("No request_output found.")
+                continue
+
+            for ro in ro_list:
+                # Multimodal output may be attached to RequestOutput or CompletionOutput.
+                mm = getattr(ro, "multimodal_output", None)
+                if not mm and ro.outputs:
+                    mm = getattr(ro.outputs[0], "multimodal_output", None)
+
+                if mm:
+                    print(f"Multimodal output keys: {mm.keys()}")
+                    if "audio" in mm:
+                        audio_out = mm["audio"]
+                        print(f"Generated Audio Shape: {audio_out.shape}")
+                        out_path = f"output_{i}.wav"
+                        sf.write(out_path, audio_out.cpu().numpy().squeeze(), 22050)
+                        print(f"Saved audio to {out_path}")
+                else:
+                    print("No multimodal output found.")
+        except Exception as e:
+            print(f"Error inspecting output: {e}")
+
+
+if __name__ == "__main__":
+    run_e2e()

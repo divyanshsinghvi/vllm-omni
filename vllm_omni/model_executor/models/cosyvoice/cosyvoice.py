@@ -78,7 +78,6 @@ def _compute_min_max_len(
 
 """
 1. step get input prompt and mm_data to return input_ids and tensors.
-()
 2.
 """
 

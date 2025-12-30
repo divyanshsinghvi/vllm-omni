@@ -49,7 +49,7 @@ _OMNI_MODELS = {
         "Qwen3OmniMoeCode2Wav",
     ),
     "CosyVoiceModel": (
-        "cosy_voice3",
+        "cosyvoice",
         "cosyvoice",
         "CosyVoiceModel",
     ),

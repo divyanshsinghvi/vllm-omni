@@ -12,20 +12,10 @@ from vllm.assets.audio import AudioAsset
 from vllm import SamplingParams
 from vllm_omni.entrypoints.omni import Omni
 
-# def create_dummy_audio(path, duration=3.0, sr=24000):
-#     if not os.path.exists(path):
-#         print(f"Creating dummy audio at {path}")
-#         audio = np.random.uniform(-0.1, 0.1, int(sr * duration))
-#         sf.write(path, audio, sr)
-#     return path
-
 
 def run_e2e():
     parser = argparse.ArgumentParser()
     # ""FunAudioLLM/Fun-CosyVoice3-0.5B-2512
-    # /mnt/d/vllm_models/local_cosyvoice
-    # /mnt/d/.cache/huggingface/hub/models--FunAudioLLM--CosyVoice2-0.5B/snapshots/7532de4ab5a24a119fbc93fdc27449a329649a4a
-    # /mnt/d/.cache/huggingface/hub/models--FunAudioLLM--Fun-CosyVoice3-0.5B-2512/snapshots/5646a54a6bea9eb1ec64b3ded068fdcf5a65f9ae
     parser.add_argument(
         "--model",
         type=str,
@@ -72,10 +62,11 @@ def run_e2e():
 
     # Map CosyVoice sampling config into vLLM SamplingParams for stage 0.
     try:
+        # TODO: This is not working correctly right now.
         hf_config = omni.instance.stage_list[0].vllm_config.model_config.hf_config
         sampling_cfg = hf_config.llm["sampling"]
     except Exception:
-        sampling_cfg = {"top_p": 0.8, "top_k": 25}
+        sampling_cfg = {"top_p": 0.8, "top_k": 25, "eos_token_id": 6561 + 1}
 
     print("Model initialized. Preparing inputs...")
     if args.audio_path:
@@ -110,28 +101,22 @@ def run_e2e():
         top_p=sampling_cfg["top_p"],
         top_k=sampling_cfg["top_k"],
         repetition_penalty=2.0,
-        max_tokens=128,
+        max_tokens=256,
+        stop_token_ids=[sampling_cfg["eos_token_id"]],
         # allowed_token_ids=list(range(6561+3)),
         detokenize=False,
     )
+    # Not used
     s2mel_sampling = SamplingParams(
         temperature=1.0,
         top_p=1.0,
         top_k=-1,
         repetition_penalty=2.0,
-        max_tokens=128,
+        max_tokens=256,
         detokenize=False,
     )
-    vocoder_sampling = SamplingParams(
-        temperature=0.0,
-        top_p=1.0,
-        top_k=-1,
-        max_tokens=128,
-        detokenize=True,
-    )
 
-    # [preproc_sampling, gpt_sampling, s2mel_sampling, vocoder_sampling]
-    sampling_params_list = [gpt_sampling, s2mel_sampling, vocoder_sampling]
+    sampling_params_list = [gpt_sampling, s2mel_sampling]
 
     # Generate (Omni orchestrator requires a per-stage SamplingParams list)
     outputs = omni.generate(prompts, sampling_params_list=sampling_params_list[:2])

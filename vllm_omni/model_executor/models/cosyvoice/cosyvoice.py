@@ -342,11 +342,14 @@ class CosyVoiceModel(
             from omegaconf import DictConfig
 
             from vllm_omni.model_executor.models.cosyvoice.dit import DiT
-            from vllm_omni.model_executor.models.cosyvoice.flow import CausalConditionalCFM, CausalMaskedDiffWithDiT
+            from vllm_omni.model_executor.models.cosyvoice.flow import (
+                CausalConditionalCFM,
+                CausalMaskedDiffWithDiT,
+                PreLookaheadLayer,
+            )
 
             # Initialize acoustic features to waveform stage
             from vllm_omni.model_executor.models.cosyvoice.hifigan import CausalConvRNNF0Predictor, CausalHiFTGenerator
-            from vllm_omni.model_executor.models.cosyvoice.transformer import PreLookaheadLayer
 
             pre_lookahead_layer = PreLookaheadLayer(**self.config.flow["pre_lookahead_layer"])
 
@@ -512,15 +515,12 @@ class CosyVoiceModel(
 
             return OmniOutput(text_hidden_states=hidden_states, multimodal_outputs=multimodal_outputs)
         elif self.model_stage == "chunk_aware_flow_matching":
-            req_ids = kwargs.get("request_ids", [])
-
             runtime_info = kwargs.get("runtime_additional_information", [])
 
-            if not req_ids:
-                d = next(self.parameters())
-                dummy_audio = torch.zeros((1, 1, 1), device=d.device, dtype=d.dtype)
-                logger.info(f"kwargs {kwargs}")
-                return OmniOutput(text_hidden_states=None, multimodal_outputs={"audio": dummy_audio})
+            if not runtime_info:
+                length = 30 * 24000
+                audio = np.zeros((length,))
+                return OmniOutput(text_hidden_states=None, multimodal_outputs={"audio": audio})
 
             d = next(self.parameters())
             device, dtype = d.device, d.dtype

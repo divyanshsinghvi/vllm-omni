@@ -47,6 +47,9 @@ def text2flow(
     output_ids = source_output.outputs[0].token_ids
     prefix_ids = source_output.prompt_token_ids
     multi_modal_data["prefix_ids"] = prefix_ids
+    logger.info("output_ids")
+    logger.info(output_ids)
+    logger.info(len(output_ids))
 
     engine_input = OmniTokensPrompt(prompt_token_ids=output_ids, additional_information=multi_modal_data)
     return [engine_input]

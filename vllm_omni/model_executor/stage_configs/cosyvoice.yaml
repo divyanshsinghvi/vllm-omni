@@ -49,7 +49,7 @@ stage_args:
       # limit_mm_per_prompt:
         # audio: 1
       skip_mm_profiling: true
-      dtype: "float32"
+      dtype: "fp16"
     engine_input_source: [0]
     custom_process_input_func: vllm_omni.model_executor.stage_input_processors.cosyvoice.text2flow
     final_output: true

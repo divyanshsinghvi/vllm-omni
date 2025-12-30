@@ -257,21 +257,21 @@ def _extract_speech_token(prompt_wav, speech_tokenizer_session, device):
 
 def _extract_spk_embedding(prompt_wav, campplus_session, device):
     speech = load_wav(prompt_wav, 16000)
-    print(f"speech {speech} {speech.shape} {speech.mean()} {speech.min()} {speech.std()} {speech.max()}")
+    # print(f"speech {speech} {speech.shape} {speech.mean()} {speech.min()} {speech.std()} {speech.max()}")
     feat = kaldi.fbank(speech, num_mel_bins=80, dither=0, sample_frequency=16000)
     feat = feat - feat.mean(dim=0, keepdim=True)
-    print(f"feat {feat} {feat.shape} {feat.mean()} {feat.min()} {feat.std()} {feat.max()}")
+    # print(f"feat {feat} {feat.shape} {feat.mean()} {feat.min()} {feat.std()} {feat.max()}")
     embedding = (
         campplus_session.run(None, {campplus_session.get_inputs()[0].name: feat.unsqueeze(dim=0).cpu().numpy()})[0]
         .flatten()
         .tolist()
     )
-    print(f"embedding {embedding} ")
+    # print(f"embedding {embedding} ")
     embedding = torch.tensor([embedding]).to(device)
-    print(
-        f"embedding {embedding} {embedding.shape} {embedding.mean()} "
-        f"{embedding.min()} {embedding.std()} {embedding.max()}"
-    )
+    # print(
+    # f"embedding {embedding} {embedding.shape} {embedding.mean()} "
+    # f"{embedding.min()} {embedding.std()} {embedding.max()}"
+    # )
     return embedding
 
 
@@ -454,7 +454,8 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
                 "embedding": embedding,
             }
         )
-        logger.info(f"Best FT {ft}")
+        # logger.info(f"Best FT {ft}")
+
         return ft
 
     def _get_mm_fields_config(
@@ -691,21 +692,15 @@ class CosyVoiceModel(
         if isinstance(hidden_states, OmniOutput):
             hidden_states = hidden_states.text_hidden_states
         if self.model_stage == "text_speech_lm":
-            print(hidden_states.shape)
-            # logger.info(f"hs {hidden_states}")
-            logger.info(f"hs {hidden_states[-1]}")
             logits = self.model.llm_decoder(hidden_states)
-            logger.info(f"logits {logits.log_softmax(dim=-1)}")
-            logger.info(f"{logits.shape}")
-            logger.info(f"argmax logits {logits.argmax()}")
             vocab_size = self.config.vocab_size
             pad_size = vocab_size - logits.size(-1)
             pad_shape = logits.shape[:-1] + (pad_size,)
             pad = logits.new_full(pad_shape, float("-inf"))
+            # logger.info(f"logits {logits.shape}")
+            # print(logits.shape)
+            logits[..., -200:] = float("-inf")
             logits = torch.cat([logits, pad], dim=-1)
-            logger.info(f"{logits.shape}")
-            logger.info(f"argmax logits {logits.argmax()}")
-
             return logits
         else:
             raise RuntimeError(f"embed_input_ids is only valid for {self.model_stage}.")
@@ -728,25 +723,19 @@ class CosyVoiceModel(
         is_multimodal=None,
     ) -> torch.Tensor:
         if self.model_stage == "text_speech_lm":
-            logger.info(f"{is_multimodal} {any(is_multimodal)} {is_multimodal is not None}")
+            # logger.info(f"{is_multimodal} {any(is_multimodal)} {is_multimodal is not None}")
             if is_multimodal is not None and any(is_multimodal):
-                logger.info(f"multimodal_embeddings {multimodal_embeddings}")
                 embed_tokens = self.model.llm.model.model.embed_tokens(input_ids)
-                logger.info(f"embed_toknes {embed_tokens.shape}")
                 sos = self.model.speech_embedding.weight[self.model.sos].reshape(1, -1)
                 task_id = self.model.speech_embedding.weight[self.model.task_id].reshape(1, -1)
                 pstoken = multimodal_embeddings[0][0]
                 pstoken_len = len(pstoken)
-                logger.info(f"pstoken {pstoken}")
                 prompt_speech_token_emb = self.model.speech_embedding(pstoken)
                 embed_tokens = torch.cat(
                     [sos, embed_tokens[2 + pstoken_len :], task_id, prompt_speech_token_emb], dim=0
                 )
-                logger.info(f"embed_toknes {embed_tokens.shape}")
             else:
                 embed_tokens = self.model.speech_embedding.weight[input_ids]
-                logger.info("starting here")
-                logger.info(f"{input_ids}\n{embed_tokens}")
             return embed_tokens
         elif self.model_stage == "chunk_aware_flow_matching":
             assert input_ids.dim() == 1
@@ -768,10 +757,10 @@ class CosyVoiceModel(
     ) -> OmniOutput:
         if self.model_stage == "text_speech_lm":
             # logger.info(f"Forward pass for text {self.model_stage}")
-            logger.info(f"input_ids {input_ids}")
+            # logger.info(f"input_ids {input_ids}")
             # logger.info(f"positions {positions} {positions.shape}")
             # logger.info(f"intermediate_tensors {intermediate_tensors}")
-            logger.info(f"inputs_embeds {inputs_embeds.shape if inputs_embeds is not None else None}")
+            # logger.info(f"inputs_embeds {inputs_embeds.shape if inputs_embeds is not None else None}")
             # logger.info(f"kwargs {kwargs.keys()}")
             # logger.info(f"kwargs {kwargs['runtime_additional_information'] if
             # 'runtime_additional_information' in kwargs else None}")
@@ -817,11 +806,12 @@ class CosyVoiceModel(
 
             return OmniOutput(text_hidden_states=hidden_states, multimodal_outputs=multimodal_outputs)
         elif self.model_stage == "chunk_aware_flow_matching":
+            # breakpoint()
             # logger.info(f"Forward pass for text {self.model_stage}")
-            # logger.info(f"input_ids {input_ids}")
+            logger.info(f"input_ids {input_ids}")
             # logger.info(f"positions {positions} {positions.shape}")
             # logger.info(f"intermediate_tensors {intermediate_tensors}")
-            # logger.info(f"inputs_embeds {inputs_embeds.shape}")
+            logger.info(f"inputs_embeds {inputs_embeds.shape if inputs_embeds is not None else None}")
             # logger.info(f"kwargs {kwargs.keys()}")
             # logger.info(f"model_stage {self.model_stage}")
             # logger.info(f"additional_information {additional_information}")
@@ -838,8 +828,19 @@ class CosyVoiceModel(
 
             d = next(self.parameters())
             device, dtype = d.device, d.dtype
-            embedding = F.normalize(runtime_info[0]["embedding"][0].to(device=device, dtype=dtype), dim=1)
+            # feat_len = runtime_info[0]["speech_feat_len"][0].to(device=device)
+            embedding = runtime_info[0]["embedding"][0].to(device=device, dtype=dtype)
+            print("embedding")
+            print(embedding)
+            print(embedding.mean())
+            embedding = F.normalize(embedding, dim=1)
+            print("embedding1")
+            print(embedding)
+            print(embedding.mean())
             embedding = self.model.spk_embed_affine_layer(embedding)
+            print("embedding2")
+            print(embedding)
+            print(embedding.mean())
 
             prompt_token = runtime_info[0]["speech_token"][0].to(device=device)
             token = input_ids.unsqueeze(0).to(device=device)
@@ -848,26 +849,45 @@ class CosyVoiceModel(
             prompt_token_len = torch.tensor([token_len1], device=token.device, dtype=torch.int32)
             token_len = torch.tensor([token_len2], device=token.device, dtype=torch.int32)
             token = torch.concat([prompt_token, token], dim=1)
+            print(token)
+            print(token.shape)
             token_len = prompt_token_len + token_len
             mask = (~_make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
-            vocab_size = self.model.input_embedding.num_embeddings
+            # vocab_size = self.model.input_embedding.num_embeddings
             # , max=vocab_size - 1
             # token = self.model.input_embedding(torch.clamp(token, min=0)) * mask
-            token = self.model.input_embedding(torch.clamp(token, min=0, max=vocab_size - 1)) * mask
+
+            token = self.model.input_embedding(torch.clamp(token, min=0)) * mask
+            print(token)
+            print(token.shape)
 
             # text encode
             prompt_feat = runtime_info[0]["speech_feat"][0]
 
             h = self.model.pre_lookahead_layer(token)
+            print(h)
+            print(h.shape)
             h = h.repeat_interleave(self.model.token_mel_ratio, dim=1)
+            print(h)
+            print(h.shape)
             mel_len1, mel_len2 = prompt_feat.shape[1], h.shape[1] - prompt_feat.shape[1]
 
             # get conditions
             conds = torch.zeros([1, mel_len1 + mel_len2, self.model.output_size], device=token.device).to(h.dtype)
+            print(conds)
+            print(conds.shape)
+
             conds[:, :mel_len1] = prompt_feat
+            print(conds)
+            print(conds.shape)
+
             conds = conds.transpose(1, 2)
 
+            print(conds)
+            print(conds.shape)
+
             mask = (~_make_pad_mask(torch.tensor([mel_len1 + mel_len2]))).to(h)
+            print(mask)
             feat, _ = self.model.decoder(
                 mu=h.transpose(1, 2).contiguous(),
                 mask=mask.unsqueeze(1),
@@ -876,7 +896,12 @@ class CosyVoiceModel(
                 n_timesteps=10,
                 streaming=False,
             )
+            print(feat)
+            print(feat.shape)
+
             feat = feat[:, :, mel_len1:]
+            print(feat)
+            print(feat.shape)
 
             tts_mel = feat
 
@@ -888,17 +913,17 @@ class CosyVoiceModel(
 
             token_offset = 0
             tts_mel = tts_mel[:, :, token_offset * self.model.token_mel_ratio :]
+            print("tts_mel")
+            print(tts_mel)
+            print(tts_mel.shape)
 
-            if self.mel_overlap_dict[req_id].shape[2] != 0:
-                tts_mel = _fade_in_out(tts_mel, self.mel_overlap_dict[req_id], self.mel_window)
-
-            hift_cache = self.hift_cache_dict[req_id]
-            if hift_cache is not None:
-                hift_cache_mel = hift_cache["mel"]
-                tts_mel = torch.concat([hift_cache_mel, tts_mel], dim=2)
-                self.hift_cache_dict[req_id]["mel"] = tts_mel
-            else:
-                self.hift_cache_dict[req_id] = {"mel": tts_mel, "speech_offset": 0}
+            # hift_cache = self.hift_cache_dict[req_id]
+            # if hift_cache is not None:
+            #     hift_cache_mel = hift_cache["mel"]
+            #     tts_mel = torch.concat([hift_cache_mel, tts_mel], dim=2)
+            #     self.hift_cache_dict[req_id]["mel"] = tts_mel
+            # else:
+            #     self.hift_cache_dict[req_id] = {"mel": tts_mel, "speech_offset": 0}
 
             # TODO Add speed control later
             # if speed != 1.0:
@@ -906,9 +931,11 @@ class CosyVoiceModel(
             hift_weight = self.hift.m_source.l_linear.weight
             tts_mel = tts_mel.to(device=hift_weight.device, dtype=hift_weight.dtype)
             tts_speech, tts_source = self.hift.inference(speech_feat=tts_mel)
-            tts_speech = tts_speech[:, self.hift_cache_dict[req_id]["speech_offset"] :]
-            self.hift_cache_dict[req_id]["speech_offset"] += tts_speech.shape[1]
+            # tts_speech = tts_speech[:, self.hift_cache_dict[req_id]["speech_offset"] :]
+            # self.hift_cache_dict[req_id]["speech_offset"] += tts_speech.shape[1]
 
+            print(tts_speech)
+            print(tts_speech.mean(), tts_speech.max(), tts_speech.min(), tts_speech.std())
             return OmniOutput(
                 text_hidden_states=None,
                 multimodal_outputs={"audio": tts_speech},

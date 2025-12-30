@@ -137,6 +137,7 @@ def run_e2e():
                     print("No multimodal output found.")
         except Exception as e:
             print(f"Error inspecting output: {e}")
+    omni.close()
 
 
 if __name__ == "__main__":

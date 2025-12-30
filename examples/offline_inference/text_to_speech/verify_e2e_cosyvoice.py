@@ -1,6 +1,5 @@
 import argparse
 import os
-from pathlib import Path
 
 import librosa
 import numpy as np
@@ -40,12 +39,7 @@ def run_e2e():
 
     # Ensure stage config exists
     if not os.path.exists(args.stage_config):
-        # Fallback to absolute path or check alternative locations
-        alt_path = Path("/home/dsinghvi/code/open_source/vllm-omni") / args.stage_config
-        if alt_path.exists():
-            args.stage_config = str(alt_path)
-        else:
-            print(f"Warning: Stage config {args.stage_config} not found.")
+        raise Exception(f"{args.stage_config} does not exist!")
 
     print(f"Initializing cosyvoice E2E with model={args.model}")
 

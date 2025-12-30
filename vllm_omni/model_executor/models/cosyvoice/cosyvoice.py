@@ -621,6 +621,7 @@ class CosyVoiceModel(
             if not req_ids:
                 d = next(self.parameters())
                 dummy_audio = torch.zeros((1, 1, 1), device=d.device, dtype=d.dtype)
+                logger.info(f"kwargs {kwargs}")
                 return OmniOutput(text_hidden_states=None, multimodal_outputs={"audio": dummy_audio})
 
             d = next(self.parameters())

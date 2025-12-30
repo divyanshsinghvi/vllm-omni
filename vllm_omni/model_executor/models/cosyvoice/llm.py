@@ -17,12 +17,11 @@ from collections.abc import Callable
 
 import torch
 from cosyvoice.transformer.label_smoothing_loss import LabelSmoothingLoss
-
-# from vllm.model_executor.models.qwen2 import Qwen2ForCausalLM
-from cosyvoice.utils.common import IGNORE_ID
-from cosyvoice.utils.mask import make_pad_mask
 from torch import nn
 from transformers import Qwen2ForCausalLM
+
+# from vllm.model_executor.models.qwen2 import Qwen2ForCausalLM
+from vllm_omni.model_executor.models.cosyvoice.utils import IGNORE_ID, make_pad_mask
 
 
 class TransformerLM(torch.nn.Module):

@@ -28,7 +28,6 @@ except ImportError:
     from torch.nn.utils import weight_norm
 from cosyvoice.transformer.activation import Snake
 from cosyvoice.transformer.convolution import CausalConv1dDownSample, CausalConv1dUpsample
-from cosyvoice.utils.common import get_padding, init_weights
 from torch.distributions.uniform import Uniform
 
 """hifigan based generator implementation.
@@ -43,6 +42,16 @@ try:
     from torch.nn.utils.parametrizations import weight_norm
 except ImportError:
     from torch.nn.utils import weight_norm
+
+
+def init_weights(m, mean=0.0, std=0.01):
+    classname = m.__class__.__name__
+    if classname.find("Conv") != -1:
+        m.weight.data.normal_(mean, std)
+
+
+def get_padding(kernel_size, dilation=1):
+    return int((kernel_size * dilation - dilation) / 2)
 
 
 class ResBlock(torch.nn.Module):

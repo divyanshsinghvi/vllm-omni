@@ -1,8 +1,8 @@
 from transformers.configuration_utils import PretrainedConfig
 
 
-class CosyVoiceConfig(PretrainedConfig):
-    model_type = "cosyvoice"
+class CosyVoice3Config(PretrainedConfig):
+    model_type = "cosyvoice3"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

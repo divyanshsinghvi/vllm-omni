@@ -20,7 +20,7 @@ from torch import nn
 from transformers import Qwen2ForCausalLM
 
 # from vllm.model_executor.models.qwen2 import Qwen2ForCausalLM
-from vllm_omni.model_executor.models.cosyvoice.utils import make_pad_mask
+from vllm_omni.model_executor.models.cosyvoice3.utils import make_pad_mask
 
 
 class TransformerLM(torch.nn.Module):

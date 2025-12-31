@@ -348,7 +348,7 @@ class CosyVoice3Tokenizer(CosyVoice2Tokenizer):
 
 
 @cache
-def get_qwen_tokenizer(token_path: str, skip_special_tokens: bool, version: str = "cosyvoice2"):
+def get_qwen_tokenizer(token_path: str, skip_special_tokens: bool, version: str = "cosyvoice3"):
     if version == "cosyvoice2":
         return CosyVoice2Tokenizer(token_path=token_path, skip_special_tokens=skip_special_tokens)
     elif version == "cosyvoice3":

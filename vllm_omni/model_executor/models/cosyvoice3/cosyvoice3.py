@@ -27,8 +27,8 @@ from vllm.multimodal.profiling import BaseDummyInputsBuilder, ProcessorInputs
 # from vllm.model_executor.models.qwen2 import
 from vllm.sequence import IntermediateTensors
 
-from vllm_omni.model_executor.models.cosyvoice.config import CosyVoiceConfig
-from vllm_omni.model_executor.models.cosyvoice.utils import (
+from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
+from vllm_omni.model_executor.models.cosyvoice3.utils import (
     concat_text_with_prompt_ids,
     extract_speech_feat,
     extract_speech_token,
@@ -45,13 +45,13 @@ from vllm_omni.model_executor.models.qwen3_omni.qwen3_omni_moe_thinker import (
 logger = init_logger(__name__)
 
 
-class CosyVoiceMultiModalProcessingInfo(BaseProcessingInfo):
+class CosyVoice3MultiModalProcessingInfo(BaseProcessingInfo):
     def get_hf_config(self):
         """If the config is not already present pass it
         as a class and it will try to find it in your
         model directory just copy the config class there also.
         """
-        return self.ctx.get_hf_config(CosyVoiceConfig)
+        return self.ctx.get_hf_config(CosyVoice3Config)
 
     def get_supported_mm_limits(self) -> Mapping[str, int | None]:
         """How many audio can you pass. I think I should keep it as 1
@@ -82,7 +82,7 @@ def _compute_min_max_len(
 """
 
 
-class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalProcessingInfo]):
+class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModalProcessingInfo]):
     def _call_hf_processor(
         self,
         prompt: str,
@@ -96,7 +96,7 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         _call_hf_processor takes input prompt and mm_data and returns
         token ids and tensors
         """
-        from vllm_omni.model_executor.models.cosyvoice.tokenizer import get_qwen_tokenizer
+        from vllm_omni.model_executor.models.cosyvoice3.tokenizer import get_qwen_tokenizer
 
         logger.info(mm_data.keys())
         # logger.info(f"{prompt} {mm_data} {mm_kwargs} {tok_kwargs}")
@@ -267,9 +267,9 @@ class CosyVoiceMultiModalProcessor(BaseMultiModalProcessor[CosyVoiceMultiModalPr
         return MultiModalDataParser(target_sr=self.info.ctx.get_hf_config().target_sr)
 
 
-class CosyVoiceDummyInputsBuilder(BaseDummyInputsBuilder[CosyVoiceMultiModalProcessingInfo]):
+class CosyVoice3DummyInputsBuilder(BaseDummyInputsBuilder[CosyVoice3MultiModalProcessingInfo]):
     def get_dummy_text(self, mm_counts: Mapping[str, int]) -> str:
-        return "Hello, this is a test of the CosyVoice system capability."
+        return "Hello, this is a test of the CosyVoice3 system capability."
 
     def get_dummy_mm_data(
         self, seq_len: int, mm_counts: Mapping[str, int], mm_options: Mapping[str, BaseDummyOptions] | None = None
@@ -301,11 +301,11 @@ class CosyVoiceDummyInputsBuilder(BaseDummyInputsBuilder[CosyVoiceMultiModalProc
 
 
 @MULTIMODAL_REGISTRY.register_processor(
-    CosyVoiceMultiModalProcessor,
-    info=CosyVoiceMultiModalProcessingInfo,
-    dummy_inputs=CosyVoiceDummyInputsBuilder,
+    CosyVoice3MultiModalProcessor,
+    info=CosyVoice3MultiModalProcessingInfo,
+    dummy_inputs=CosyVoice3DummyInputsBuilder,
 )
-class CosyVoiceModel(
+class CosyVoice3Model(
     nn.Module,
     SupportsMultiModal,
 ):
@@ -322,7 +322,7 @@ class CosyVoiceModel(
         if self.model_stage == "text_speech_lm":
             # Initialize text to speech LM stage
 
-            from vllm_omni.model_executor.models.cosyvoice.llm import CosyVoice3LM, Qwen2Encoder
+            from vllm_omni.model_executor.models.cosyvoice3.llm import CosyVoice3LM, Qwen2Encoder
 
             # os.path.join(model_dir,
             llm = Qwen2Encoder(os.path.join(self.model_dir, self.config.llm["llm"]["pretrain_path"]))  # .eval()
@@ -341,15 +341,15 @@ class CosyVoiceModel(
             # Initialize chunk aware flow matching stage
             from omegaconf import DictConfig
 
-            from vllm_omni.model_executor.models.cosyvoice.dit import DiT
-            from vllm_omni.model_executor.models.cosyvoice.flow import (
+            from vllm_omni.model_executor.models.cosyvoice3.dit import DiT
+            from vllm_omni.model_executor.models.cosyvoice3.flow import (
                 CausalConditionalCFM,
                 CausalMaskedDiffWithDiT,
                 PreLookaheadLayer,
             )
 
             # Initialize acoustic features to waveform stage
-            from vllm_omni.model_executor.models.cosyvoice.hifigan import CausalConvRNNF0Predictor, CausalHiFTGenerator
+            from vllm_omni.model_executor.models.cosyvoice3.hifigan import CausalConvRNNF0Predictor, CausalHiFTGenerator
 
             pre_lookahead_layer = PreLookaheadLayer(**self.config.flow["pre_lookahead_layer"])
 

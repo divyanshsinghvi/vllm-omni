@@ -21,7 +21,7 @@ def run_e2e():
         default="/mnt/d/.cache/huggingface/hub/models--FunAudioLLM--Fun-CosyVoice3-0.5B-2512/snapshots/5646a54a6bea9eb1ec64b3ded068fdcf5a65f9ae",
     )
     # parser.add_argument("--model", type=str, default="/mnt/d/vllm_models/local_cosyvoice")
-    parser.add_argument("--stage-config", type=str, default="vllm_omni/model_executor/stage_configs/cosyvoice.yaml")
+    parser.add_argument("--stage-config", type=str, default="vllm_omni/model_executor/stage_configs/cosyvoice3.yaml")
     parser.add_argument("--prompt", type=str, default="Hello, this is a test of the CosyVoice system capability.")
     parser.add_argument(
         "--prompt-text",

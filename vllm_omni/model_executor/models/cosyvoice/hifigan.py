@@ -19,6 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from scipy.signal import get_window
+from torch import pow, sin
 from torch.nn import Conv1d, ConvTranspose1d
 from torch.nn.utils import remove_weight_norm
 
@@ -26,9 +27,65 @@ try:
     from torch.nn.utils.parametrizations import weight_norm
 except ImportError:
     from torch.nn.utils import weight_norm
-from cosyvoice.transformer.activation import Snake
-from cosyvoice.transformer.convolution import CausalConv1dDownSample, CausalConv1dUpsample
 from torch.distributions.uniform import Uniform
+from torch.nn import Parameter
+
+
+# Implementation adapted from https://github.com/EdwardDixon/snake under the MIT license.
+#   LICENSE is in incl_licenses directory.
+class Snake(nn.Module):
+    """
+    Implementation of a sine-based periodic activation function
+    Shape:
+        - Input: (B, C, T)
+        - Output: (B, C, T), same shape as the input
+    Parameters:
+        - alpha - trainable parameter
+    References:
+        - This activation function is from this paper by Liu Ziyin, Tilman Hartwig, Masahito Ueda:
+        https://arxiv.org/abs/2006.08195
+    Examples:
+        >>> a1 = snake(256)
+        >>> x = torch.randn(256)
+        >>> x = a1(x)
+    """
+
+    def __init__(self, in_features, alpha=1.0, alpha_trainable=True, alpha_logscale=False):
+        """
+        Initialization.
+        INPUT:
+            - in_features: shape of the input
+            - alpha: trainable parameter
+            alpha is initialized to 1 by default, higher values = higher-frequency.
+            alpha will be trained along with the rest of your model.
+        """
+        super().__init__()
+        self.in_features = in_features
+
+        # initialize alpha
+        self.alpha_logscale = alpha_logscale
+        if self.alpha_logscale:  # log scale alphas initialized to zeros
+            self.alpha = Parameter(torch.zeros(in_features) * alpha)
+        else:  # linear scale alphas initialized to ones
+            self.alpha = Parameter(torch.ones(in_features) * alpha)
+
+        self.alpha.requires_grad = alpha_trainable
+
+        self.no_div_by_zero = 0.000000001
+
+    def forward(self, x):
+        """
+        Forward pass of the function.
+        Applies the function to the input elementwise.
+        Snake ∶= x + 1/a * sin^2 (xa)
+        """
+        alpha = self.alpha.unsqueeze(0).unsqueeze(-1)  # line up with x to [B, C, T]
+        if self.alpha_logscale:
+            alpha = torch.exp(alpha)
+        x = x + (1.0 / (alpha + self.no_div_by_zero)) * pow(sin(x * alpha), 2)
+
+        return x
+
 
 """hifigan based generator implementation.
 
@@ -37,11 +94,6 @@ This code is modified from https://github.com/jik876/hifi-gan
  https://github.com/NVIDIA/BigVGAN
 
 """
-
-try:
-    from torch.nn.utils.parametrizations import weight_norm
-except ImportError:
-    from torch.nn.utils import weight_norm
 
 
 def init_weights(m, mean=0.0, std=0.01):
@@ -743,6 +795,91 @@ class CausalHiFTGenerator(HiFTGenerator):
                 x=speech_feat[:, :, : -self.f0_predictor.condnet[0].causal_padding], s=s, finalize=finalize
             )
         return generated_speech, s
+
+
+class CausalConv1dUpsample(torch.nn.Conv1d):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int = 1,
+        dilation: int = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: str = "zeros",
+        device=None,
+        dtype=None,
+    ) -> None:
+        super().__init__(
+            in_channels,
+            out_channels,
+            kernel_size,
+            1,
+            padding=0,
+            dilation=dilation,
+            groups=groups,
+            bias=bias,
+            padding_mode=padding_mode,
+            device=device,
+            dtype=dtype,
+        )
+        assert dilation == 1
+        self.causal_padding = kernel_size - 1
+        self.upsample = torch.nn.Upsample(scale_factor=stride, mode="nearest")
+
+    def forward(self, x: torch.Tensor, cache: torch.Tensor = torch.zeros(0, 0, 0)) -> tuple[torch.Tensor, torch.Tensor]:
+        x = self.upsample(x)
+        input_timestep = x.shape[2]
+        if cache.size(2) == 0:
+            x = F.pad(x, (self.causal_padding, 0), value=0.0)
+        else:
+            assert cache.size(2) == self.causal_padding
+            x = torch.concat([cache, x], dim=2)
+        x = super().forward(x)
+        assert input_timestep == x.shape[2]
+        return x
+
+
+class CausalConv1dDownSample(torch.nn.Conv1d):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int = 1,
+        dilation: int = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: str = "zeros",
+        device=None,
+        dtype=None,
+    ) -> None:
+        super().__init__(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding=0,
+            dilation=dilation,
+            groups=groups,
+            bias=bias,
+            padding_mode=padding_mode,
+            device=device,
+            dtype=dtype,
+        )
+        assert stride != 1 and dilation == 1
+        assert kernel_size % stride == 0
+        self.causal_padding = stride - 1
+
+    def forward(self, x: torch.Tensor, cache: torch.Tensor = torch.zeros(0, 0, 0)) -> tuple[torch.Tensor, torch.Tensor]:
+        if cache.size(2) == 0:
+            x = F.pad(x, (self.causal_padding, 0), value=0.0)
+        else:
+            assert cache.size(2) == self.causal_padding
+            x = torch.concat([cache, x], dim=2)
+        x = super().forward(x)
+        return x
 
 
 # NOTE(Xiang Lyu) causal conv module used in convolution-based vocoder

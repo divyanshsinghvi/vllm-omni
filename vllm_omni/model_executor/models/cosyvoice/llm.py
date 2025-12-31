@@ -16,12 +16,11 @@
 from collections.abc import Callable
 
 import torch
-from cosyvoice.transformer.label_smoothing_loss import LabelSmoothingLoss
 from torch import nn
 from transformers import Qwen2ForCausalLM
 
 # from vllm.model_executor.models.qwen2 import Qwen2ForCausalLM
-from vllm_omni.model_executor.models.cosyvoice.utils import IGNORE_ID, make_pad_mask
+from vllm_omni.model_executor.models.cosyvoice.utils import make_pad_mask
 
 
 class TransformerLM(torch.nn.Module):
@@ -53,12 +52,6 @@ class TransformerLM(torch.nn.Module):
         self.llm_embedding = torch.nn.Embedding(2, llm_input_size)
         self.llm = llm
         self.llm_decoder = nn.Linear(llm_output_size, speech_token_size + 1)
-        self.criterion_ce = LabelSmoothingLoss(
-            size=speech_token_size + 1,
-            padding_idx=IGNORE_ID,
-            smoothing=lsm_weight,
-            normalize_length=length_normalized_loss,
-        )
 
         # 3. [Optional] build speech token related modules
         self.speech_embedding = torch.nn.Embedding(speech_token_size, llm_input_size)
@@ -124,12 +117,6 @@ class Qwen2LM(TransformerLM):
         self.llm_embedding = torch.nn.Embedding(2, llm_input_size)
         self.llm = llm
         self.llm_decoder = nn.Linear(llm_output_size, speech_token_size + 3)
-        self.criterion_ce = LabelSmoothingLoss(
-            size=speech_token_size + 3,
-            padding_idx=IGNORE_ID,
-            smoothing=lsm_weight,
-            normalize_length=length_normalized_loss,
-        )
 
         # 3. [Optional] build speech token related modules
         self.speech_embedding = torch.nn.Embedding(speech_token_size + 3, llm_input_size)
@@ -166,12 +153,6 @@ class CosyVoice3LM(Qwen2LM):
 
         self.llm = llm
         self.llm_decoder = nn.Linear(llm_output_size, speech_token_size + 200, bias=False)
-        self.criterion_ce = LabelSmoothingLoss(
-            size=speech_token_size + 200,
-            padding_idx=IGNORE_ID,
-            smoothing=lsm_weight,
-            normalize_length=length_normalized_loss,
-        )
 
         # 3. [Optional] build speech token related modules
         self.speech_embedding = torch.nn.Embedding(speech_token_size + 200, llm_input_size)

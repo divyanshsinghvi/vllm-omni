@@ -15,11 +15,11 @@
 
 import logging
 import random
+from abc import ABC
 
 import numpy as np
 import torch
 import torch.nn as nn
-from matcha.models.components.flow_matching import BASECFM
 from omegaconf import DictConfig
 from torch.nn import functional as F
 
@@ -106,6 +106,27 @@ class PreLookaheadLayer(nn.Module):
         # residual connection
         outputs = outputs + inputs
         return outputs
+
+
+class BASECFM(torch.nn.Module, ABC):
+    def __init__(
+        self,
+        n_feats,
+        cfm_params,
+        n_spks=1,
+        spk_emb_dim=128,
+    ):
+        super().__init__()
+        self.n_feats = n_feats
+        self.n_spks = n_spks
+        self.spk_emb_dim = spk_emb_dim
+        self.solver = cfm_params.solver
+        if hasattr(cfm_params, "sigma_min"):
+            self.sigma_min = cfm_params.sigma_min
+        else:
+            self.sigma_min = 1e-4
+
+        self.estimator = None
 
 
 class ConditionalCFM(BASECFM):

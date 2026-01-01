@@ -3,7 +3,6 @@ from collections.abc import Iterable, Mapping, Sequence
 from functools import partial
 
 import numpy as np
-import onnxruntime
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -96,6 +95,8 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
         _call_hf_processor takes input prompt and mm_data and returns
         token ids and tensors
         """
+        import onnxruntime
+
         from vllm_omni.model_executor.models.cosyvoice3.tokenizer import get_qwen_tokenizer
 
         logger.info(mm_data.keys())

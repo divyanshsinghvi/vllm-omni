@@ -4,9 +4,9 @@ import os
 import librosa
 import numpy as np
 import soundfile as sf
+from vllm import SamplingParams
 from vllm.assets.audio import AudioAsset
 
-from vllm import SamplingParams
 from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
 from vllm_omni.model_executor.models.cosyvoice3.tokenizer import get_qwen_tokenizer
@@ -21,7 +21,6 @@ def run_e2e():
         type=str,
         default="pretrained_models/Fun-CosyVoice3-0.5B/",
     )
-    # parser.add_argument("--model", type=str, default="/mnt/d/vllm_models/local_cosyvoice")
     parser.add_argument("--stage-config", type=str, default="vllm_omni/model_executor/stage_configs/cosyvoice3.yaml")
     parser.add_argument("--prompt", type=str, default="Hello, this is a test of the CosyVoice system capability.")
     parser.add_argument(

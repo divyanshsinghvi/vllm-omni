@@ -199,18 +199,19 @@ class OmniBase:
         ray_address = kwargs.get("ray_address", None)
         batch_timeout = kwargs.get("batch_timeout", 10)
         stage_configs_path = kwargs.get("stage_configs_path", None)
+        base_engine_args = kwargs.get("base_engine_args", None)
         log_stats = kwargs.get("log_stats", False)
 
         # Load stage configurations from YAML
         if stage_configs_path is None:
             self.config_path = resolve_model_config_path(model)
-            self.stage_configs = load_stage_configs_from_model(model)
+            self.stage_configs = load_stage_configs_from_model(model, base_engine_args=base_engine_args)
             if not self.stage_configs:
                 default_stage_cfg = self._create_default_diffusion_stage_cfg(kwargs)
                 self.stage_configs = OmegaConf.create(default_stage_cfg)
         else:
             self.config_path = stage_configs_path
-            self.stage_configs = load_stage_configs_from_yaml(stage_configs_path)
+            self.stage_configs = load_stage_configs_from_yaml(stage_configs_path, base_engine_args=base_engine_args)
 
         # Initialize connectors
         self.omni_transfer_config, self.connectors = initialize_orchestrator_connectors(

@@ -53,5 +53,5 @@ Key components in `vllm_omni/model_executor/models/cosyvoice3/cosyvoice3.py`:
   - Stage 1 runs the flow model (DiT-based CFM) and HiFiGAN to synthesize waveform.
 
 Stage wiring is configured in `vllm_omni/model_executor/stage_configs/cosyvoice3.yaml`:
-- Stage 0 emits latent speech tokens.
+- Stage 0 emits latent speech tokens .
 - Stage 1 consumes them via `custom_process_input_func` and outputs audio.

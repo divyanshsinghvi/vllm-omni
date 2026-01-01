@@ -4,11 +4,11 @@ import os
 import librosa
 import numpy as np
 import soundfile as sf
+from vllm import SamplingParams
 
 # Use Omni entrypoint directly
 from vllm.assets.audio import AudioAsset
 
-from vllm import SamplingParams
 from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
 from vllm_omni.model_executor.models.cosyvoice3.tokenizer import get_qwen_tokenizer

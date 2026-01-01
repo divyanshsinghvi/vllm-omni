@@ -1,8 +1,11 @@
+import os
+from functools import cache
+
 import numpy as np
 import torch
+import torch.nn.functional as F
 import torchaudio
 import torchaudio.compliance.kaldi as kaldi
-import whisper
 from librosa.filters import mel as librosa_mel_fn
 
 IGNORE_ID = -1
@@ -86,10 +89,97 @@ def extract_speech_feat(prompt_wav, feat_extractor, device):
     return speech_feat, speech_feat_len
 
 
+# Adopted from https://github.com/openai/whisper/blob/main/whisper/audio.py
+
+
+def exact_div(x, y):
+    assert x % y == 0
+    return x // y
+
+
+@cache
+def mel_filters(device, n_mels: int) -> torch.Tensor:
+    """
+    load the mel filterbank matrix for projecting STFT into a Mel spectrogram.
+    Allows decoupling librosa dependency; saved using:
+
+        np.savez_compressed(
+            "mel_filters.npz",
+            mel_80=librosa.filters.mel(sr=16000, n_fft=400, n_mels=80),
+            mel_128=librosa.filters.mel(sr=16000, n_fft=400, n_mels=128),
+        )
+    """
+    assert n_mels in {80, 128}, f"Unsupported n_mels: {n_mels}"
+
+    filters_path = os.path.join(os.path.dirname(__file__), "assets", "mel_filters.npz")
+    # TODO To remove whisper dependency this needs to be downloaded. Ideally this should be
+    # passed with a path argument if user don't want to store it here.
+    if not os.path.exists(filters_path):
+        import urllib.request
+
+        os.makedirs(os.path.dirname(filters_path), exist_ok=True)
+        url = "https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/mel_filters.npz"
+        urllib.request.urlretrieve(url, filters_path)
+
+    with np.load(filters_path, allow_pickle=False) as f:
+        return torch.from_numpy(f[f"mel_{n_mels}"]).to(device)
+
+
+def log_mel_spectrogram(
+    audio: str | np.ndarray | torch.Tensor,
+    n_mels: int = 80,
+    padding: int = 0,
+    device: str | torch.device | None = None,
+):
+    """
+    Compute the log-Mel spectrogram of
+
+    Parameters
+    ----------
+    audio: Union[str, np.ndarray, torch.Tensor], shape = (*)
+        The path to audio or either a NumPy array or Tensor containing the audio waveform in 16 kHz
+
+    n_mels: int
+        The number of Mel-frequency filters, only 80 and 128 are supported
+
+    padding: int
+        Number of zero samples to pad to the right
+
+    device: Optional[Union[str, torch.device]]
+        If given, the audio tensor is moved to this device before STFT
+
+    Returns
+    -------
+    torch.Tensor, shape = (n_mels, n_frames)
+        A Tensor that contains the Mel spectrogram
+    """
+    N_FFT = 400
+    HOP_LENGTH = 160
+
+    if not torch.is_tensor(audio):
+        raise Exception(f"audio is not tensor {type(audio)}")
+
+    if device is not None:
+        audio = audio.to(device)
+    if padding > 0:
+        audio = F.pad(audio, (0, padding))
+    window = torch.hann_window(N_FFT).to(audio.device)
+    stft = torch.stft(audio, N_FFT, HOP_LENGTH, window=window, return_complex=True)
+    magnitudes = stft[..., :-1].abs() ** 2
+
+    filters = mel_filters(audio.device, n_mels)
+    mel_spec = filters @ magnitudes
+
+    log_spec = torch.clamp(mel_spec, min=1e-10).log10()
+    log_spec = torch.maximum(log_spec, log_spec.max() - 8.0)
+    log_spec = (log_spec + 4.0) / 4.0
+    return log_spec
+
+
 def extract_speech_token(prompt_wav, speech_tokenizer_session, device):
     speech = load_wav(prompt_wav, 16000)
     assert speech.shape[1] / 16000 <= 30, "do not support extract speech token for audio longer than 30s"
-    feat = whisper.log_mel_spectrogram(speech, n_mels=128)
+    feat = log_mel_spectrogram(speech, n_mels=128)
     speech_token = (
         speech_tokenizer_session.run(
             None,

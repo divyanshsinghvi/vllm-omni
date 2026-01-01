@@ -119,7 +119,7 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
             providers=["CUDAExecutionProvider" if torch.cuda.is_available() else "CPUExecutionProvider"],
         )
 
-        from matcha.utils.audio import mel_spectrogram
+        from vllm_omni.model_executor.models.cosyvoice3.utils import mel_spectrogram
 
         feat_cfg = getattr(config, "feat_extractor", {})
         self.feat_extractor = partial(mel_spectrogram, **feat_cfg)

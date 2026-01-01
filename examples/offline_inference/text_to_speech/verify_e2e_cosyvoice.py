@@ -4,9 +4,9 @@ import os
 import librosa
 import numpy as np
 import soundfile as sf
-from vllm import SamplingParams
 from vllm.assets.audio import AudioAsset
 
+from vllm import SamplingParams
 from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
 from vllm_omni.model_executor.models.cosyvoice3.tokenizer import get_qwen_tokenizer
@@ -41,6 +41,9 @@ def run_e2e():
         help="Log file path prefix (e.g., /tmp/omni_logs).",
     )
     args = parser.parse_args()
+    # Ensure tokenizer directory exists
+    if not os.path.exists(args.tokenizer):
+        raise Exception(f"{args.tokenizer} does not exist!")
 
     # Ensure stage config exists
     if not os.path.exists(args.stage_config):
@@ -56,7 +59,7 @@ def run_e2e():
         stage_configs_path=args.stage_config,
         trust_remote_code=True,
         log_file=args.log_file,
-        # skip_tokenizer_init=True,
+        base_engine_args={"tokenizer": args.tokenizer},
     )
 
     # Map CosyVoice sampling config into vLLM SamplingParams for stage 0.

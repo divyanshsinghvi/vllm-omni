@@ -4,11 +4,9 @@ import os
 import librosa
 import numpy as np
 import soundfile as sf
-from vllm import SamplingParams
-
-# Use Omni entrypoint directly
 from vllm.assets.audio import AudioAsset
 
+from vllm import SamplingParams
 from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
 from vllm_omni.model_executor.models.cosyvoice3.tokenizer import get_qwen_tokenizer
@@ -21,7 +19,7 @@ def run_e2e():
     parser.add_argument(
         "--model",
         type=str,
-        default="/mnt/d/.cache/huggingface/hub/models--FunAudioLLM--Fun-CosyVoice3-0.5B-2512/snapshots/5646a54a6bea9eb1ec64b3ded068fdcf5a65f9ae",
+        default="pretrained_models/Fun-CosyVoice3-0.5B/",
     )
     # parser.add_argument("--model", type=str, default="/mnt/d/vllm_models/local_cosyvoice")
     parser.add_argument("--stage-config", type=str, default="vllm_omni/model_executor/stage_configs/cosyvoice3.yaml")
@@ -35,7 +33,7 @@ def run_e2e():
     parser.add_argument(
         "--tokenizer",
         type=str,
-        default="/mnt/d/.cache/huggingface/hub/models--FunAudioLLM--Fun-CosyVoice3-0.5B-2512/snapshots/5646a54a6bea9eb1ec64b3ded068fdcf5a65f9ae/CosyVoice-BlankEN",
+        default="pretrained_models/Fun-CosyVoice3-0.5B/CosyVoice-BlankEN",
     )
     parser.add_argument(
         "--log-file",

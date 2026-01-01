@@ -123,7 +123,3 @@ class CosyVoice3Config(PretrainedConfig):
                 "cond_channels": 512,
             },
         }
-        self.hf_cache_location = "/mnt/d/.cache/huggingface/hub/models--FunAudioLLM--Fun-CosyVoice3-0.5B-2512/"
-        self.model_path = "snapshots/5646a54a6bea9eb1ec64b3ded068fdcf5a65f9ae/"
-        self.model_dir = self.hf_cache_location + self.model_path
-        self.tokenizer_path = self.hf_cache_location + self.model_path + "CosyVoice-BlankEN"

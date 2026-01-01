@@ -10,6 +10,9 @@ from vllm.assets.audio import AudioAsset
 
 from vllm import SamplingParams
 from vllm_omni.entrypoints.omni import Omni
+from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
+from vllm_omni.model_executor.models.cosyvoice3.tokenizer import get_qwen_tokenizer
+from vllm_omni.model_executor.models.cosyvoice3.utils import extract_text_token
 
 
 def run_e2e():
@@ -29,6 +32,11 @@ def run_e2e():
         default="You are a helpful assistant.<|endofprompt|>Testing my voices. Why should I not?",
     )
     parser.add_argument("--audio-path", type=str, default="prompt.wav")
+    parser.add_argument(
+        "--tokenizer",
+        type=str,
+        default="/mnt/d/.cache/huggingface/hub/models--FunAudioLLM--Fun-CosyVoice3-0.5B-2512/snapshots/5646a54a6bea9eb1ec64b3ded068fdcf5a65f9ae/CosyVoice-BlankEN",
+    )
     parser.add_argument(
         "--log-file",
         type=str,
@@ -84,13 +92,25 @@ def run_e2e():
 
     print(f"Generating for prompt: {args.prompt}")
 
+    config = CosyVoice3Config()
+    tokenizer = get_qwen_tokenizer(
+        token_path=args.tokenizer,
+        skip_special_tokens=config.skip_special_tokens,
+        version=config.version,
+    )
+    _, text_token_len = extract_text_token(args.prompt, tokenizer, config.allowed_special)
+    base_len = int(text_token_len)
+    min_len = int(base_len * config.min_token_text_ratio)
+    max_len = int(base_len * config.max_token_text_ratio)
+
     # Build SamplingParams for each stage (GPT, S2Mel, Vocoder)
     gpt_sampling = SamplingParams(
         temperature=1.0,
         top_p=sampling_cfg["top_p"],
         top_k=sampling_cfg["top_k"],
         repetition_penalty=2.0,
-        max_tokens=256,
+        min_tokens=min_len,
+        max_tokens=max_len,
         stop_token_ids=[sampling_cfg["eos_token_id"]],
         # allowed_token_ids=list(range(6561+3)),
         detokenize=False,
@@ -108,7 +128,7 @@ def run_e2e():
     sampling_params_list = [gpt_sampling, s2mel_sampling]
 
     # Generate (Omni orchestrator requires a per-stage SamplingParams list)
-    outputs = omni.generate(prompts, sampling_params_list=sampling_params_list[:2])
+    outputs = list(omni.generate(prompts, sampling_params_list=sampling_params_list[:2]))
     print(outputs)
     # Verify outputs
     print(f"Received {len(outputs)} outputs.")

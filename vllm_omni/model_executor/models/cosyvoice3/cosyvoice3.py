@@ -425,9 +425,7 @@ class CosyVoice3Model(
             pad_size = vocab_size - logits.size(-1)
             pad_shape = logits.shape[:-1] + (pad_size,)
             pad = logits.new_full(pad_shape, float("-inf"))
-            # logger.info(f"logits {logits.shape}")
-            # print(logits.shape)
-            eos_token_val = logits[..., self.config.llm["eos_token_id"]]
+            eos_token_val = logits[..., self.config.llm["eos_token_id"]].clone()
             logits[..., -200:] = float("-inf")
             logits[..., self.config.llm["eos_token_id"]] = eos_token_val
             logits = torch.cat([logits, pad], dim=-1)
@@ -529,6 +527,10 @@ class CosyVoice3Model(
             embedding = self.model.spk_embed_affine_layer(embedding)
 
             prompt_token = runtime_info[0]["speech_token"][0].to(device=device)
+            # TODO: Is it better to replace EOS with random token or remove the last token.
+            # This is done to remove the last eos token.
+            input_ids = input_ids[..., :-1]
+
             token = input_ids.unsqueeze(0).to(device=device)
             token_len1, token_len2 = prompt_token.shape[1], token.shape[1]
             # Build length tensors for pad mask logic.

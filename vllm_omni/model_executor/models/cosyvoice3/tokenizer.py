@@ -342,9 +342,6 @@ class CosyVoice3Tokenizer(CosyVoice2Tokenizer):
         self.tokenizer = AutoTokenizer.from_pretrained(token_path)
         self.tokenizer.add_special_tokens(special_tokens)
         self.skip_special_tokens = skip_special_tokens
-        # print(max(self.tokenizer.get_vocab().values()))
-        # print(self.tokenizer.vocab_size - 1)
-        # print(len(self.tokenizer) - 1)
 
 
 @cache

@@ -445,7 +445,7 @@ def mock_get_config(monkeypatch):
 def test_initialize_stage_configs_called_when_none(monkeypatch, fake_stage_config):
     """Test that stage configs are auto-loaded when stage_configs_path is None."""
 
-    def _fake_loader(model: str):
+    def _fake_loader(model: str, base_engine_args=None):
         return [
             _FakeStageConfig(fake_stage_config),
             _FakeStageConfig(fake_stage_config),

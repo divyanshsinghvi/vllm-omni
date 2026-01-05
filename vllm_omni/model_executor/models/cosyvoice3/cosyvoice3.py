@@ -99,11 +99,7 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
 
         from vllm_omni.model_executor.models.cosyvoice3.tokenizer import get_qwen_tokenizer
 
-        logger.info(mm_data.keys())
-        # logger.info(f"{prompt} {mm_data} {mm_kwargs} {tok_kwargs}")
         config = self.info.ctx.get_hf_config()
-        # mc = self.info.ctx.model_config
-        # logger.info("HF processor stage_id=%s model_stage=%s", mc.stage_id, mc.model_stage)
         model_dir = self.info.ctx.model_config.model
         self.tokenizer = get_qwen_tokenizer(
             token_path=os.path.join(model_dir, config.qwen_pretrain_path),
@@ -135,21 +131,18 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
         if audio is None:
             audio = mm_data.get("audios")
             if audio is not None:
-                logger.info(f"audios : {audio}")
                 audio = audio[0], config.target_sr
 
         text_token, text_token_len = extract_text_token(prompt, self.tokenizer, config.allowed_special)
         if audio is None:
             # Text-only path for profiling/cache
             return BatchFeature({"input_ids": text_token, "input_len": [text_token_len]})
-        logger.info("audio shape=%s", audio[0].shape)
 
         prompt_text = mm_kwargs.get("prompt_text")
         ## Unsure how to pass prompt text for profiling'
         # cannot pass text in mm_data so need to have a workaround.
         # For now if audio is present but prompt text is not I can
         # return at above only?
-        # logger.info(f"prompt_text {prompt_text}")
 
         if not isinstance(prompt_text, str):
             raise ValueError(f"prompt text is None : {prompt_text}")
@@ -164,7 +157,7 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
             prompt_text_token,
             prompt_text_token_len,
         )
-        logger.info(
+        logger.debug(
             "cosyvoice _call_hf_processor: prompt_text_token=%s text_token=%s input_ids=%s "
             "prompt_text_len=%s text_len=%s input_len=%s",
             prompt_text_token.tolist(),
@@ -435,7 +428,6 @@ class CosyVoice3Model(
             raise RuntimeError(f"embed_input_ids is only valid for {self.model_stage}.")
 
     def embed_multimodal(self, **kwargs: object) -> torch.Tensor:
-        # logger.info(f"embed_multimodal kwargs {kwargs}")
         if self.model_stage == "text_speech_lm":
             self.speech_token = kwargs["speech_token"]
             self.embedding = kwargs["embedding"]
@@ -451,7 +443,6 @@ class CosyVoice3Model(
         is_multimodal=None,
     ) -> torch.Tensor:
         if self.model_stage == "text_speech_lm":
-            # logger.info(f"{is_multimodal} {any(is_multimodal)} {is_multimodal is not None}")
             if is_multimodal is not None and any(is_multimodal):
                 embed_tokens = self.model.llm.model.model.embed_tokens(input_ids)
                 sos = self.model.speech_embedding.weight[self.model.sos].reshape(1, -1)

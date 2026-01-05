@@ -431,7 +431,7 @@ def add_optional_chunk_mask(
             False: chunk size ~ U[1, 25]
 
     Returns:
-        torch.Tensor: chunk mask of the input xs.
+        chunk_masks (torch.Tensor): chunk mask of the input xs.
     """
     # Whether to use chunk mask or not
     if use_dynamic_chunk:

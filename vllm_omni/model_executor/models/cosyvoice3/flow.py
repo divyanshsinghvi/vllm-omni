@@ -135,10 +135,10 @@ class ConditionalCFM(BASECFM):
             temperature (float, optional): temperature for scaling noise. Defaults to 1.0.
             spks (torch.Tensor, optional): speaker ids. Defaults to None.
                 shape: (batch_size, spk_emb_dim)
-            cond: Not used but kept for future purposes
+            cond (Optional[Any], optional): Not used but kept for future purposes
 
         Returns:
-            sample: generated mel-spectrogram
+            sample (torch.Tensor): generated mel-spectrogram
                 shape: (batch_size, n_feats, mel_timesteps)
         """
 
@@ -170,7 +170,7 @@ class ConditionalCFM(BASECFM):
                 shape: (batch_size, 1, mel_timesteps)
             spks (torch.Tensor, optional): speaker ids. Defaults to None.
                 shape: (batch_size, spk_emb_dim)
-            cond: Not used but kept for future purposes
+            cond (Optional[Any], optional): Not used but kept for future purposes
         """
         t, _, dt = t_span[0], t_span[-1], t_span[1] - t_span[0]
         t = t.unsqueeze(dim=0)
@@ -258,10 +258,10 @@ class CausalConditionalCFM(ConditionalCFM):
             temperature (float, optional): temperature for scaling noise. Defaults to 1.0.
             spks (torch.Tensor, optional): speaker ids. Defaults to None.
                 shape: (batch_size, spk_emb_dim)
-            cond: Not used but kept for future purposes
+            cond (Optional[Any], optional): Not used but kept for future purposes
 
         Returns:
-            sample: generated mel-spectrogram
+            sample (torch.Tensor): generated mel-spectrogram
                 shape: (batch_size, n_feats, mel_timesteps)
         """
 

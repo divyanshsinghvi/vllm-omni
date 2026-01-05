@@ -51,7 +51,7 @@ class CosyVoice2Tokenizer:
 
 class CosyVoice3Tokenizer(CosyVoice2Tokenizer):
     def __init__(self, token_path, skip_special_tokens=True):
-        # NOTE: non-chat model, all these special tokens keep randomly initialized i.
+        # NOTE: non-chat model, all these special tokens keep randomly initialized.
         special_tokens = {
             "eos_token": "<|endoftext|>",
             "pad_token": "<|endoftext|>",

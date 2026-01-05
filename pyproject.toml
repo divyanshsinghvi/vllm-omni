@@ -169,5 +169,5 @@ extend-ignore-identifiers-re = [
     ".*NOTHINK.*",
     ".*nin.*",
 ]
-[tool.typs.default.extend-words]
-    ue = "ue"
+[tool.typos.default.extend-words]
+ue = "ue"

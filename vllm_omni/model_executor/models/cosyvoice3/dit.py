@@ -16,9 +16,12 @@ import torch.nn.functional as F
 from diffusers.models.normalization import AdaLayerNormZero
 from einops import repeat
 from torch import nn
+from vllm.logger import init_logger
 from x_transformers.x_transformers import RotaryEmbedding, apply_rotary_pos_emb
 
 # rotary positional embedding related
+
+logger = init_logger(__name__)
 
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, theta_rescale_factor=1.0):
@@ -464,7 +467,7 @@ def add_optional_chunk_mask(
         chunk_masks = masks
     assert chunk_masks.dtype == torch.bool
     if (chunk_masks.sum(dim=-1) == 0).sum().item() != 0:
-        print(
+        logger.debug(
             "get chunk_masks all false at some timestep, force set to true, "
             "make sure they are masked in futuer computation!"
         )

@@ -532,7 +532,6 @@ class HiFTGenerator(nn.Module):
         self.f0_predictor = f0_predictor
 
     def remove_weight_norm(self):
-        print("Removing weight norm...")
         for layer in self.ups:
             remove_weight_norm(layer)
         for block in self.resblocks:

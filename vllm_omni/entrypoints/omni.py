@@ -199,8 +199,12 @@ class OmniBase:
         ray_address = kwargs.get("ray_address", None)
         batch_timeout = kwargs.get("batch_timeout", 10)
         stage_configs_path = kwargs.get("stage_configs_path", None)
-        base_engine_args = kwargs.get("base_engine_args", None)
         log_stats = kwargs.get("log_stats", False)
+
+        ### base engine args
+        tokenizer = kwargs.get("tokenizer", None)
+
+        base_engine_args = {"tokenizer": tokenizer} if tokenizer is not None else None
 
         # Load stage configurations from YAML
         if stage_configs_path is None:

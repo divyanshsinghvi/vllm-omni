@@ -270,10 +270,10 @@ class CosyVoice3Model(
         self.model_stage = vllm_config.model_config.model_stage
         self.model_dir = vllm_config.model_config.model
         self.model = None
-        if self.model_stage == "text_speech_lm":
-            # Initialize text to speech LM stage
+        if self.model_stage == "talker":
+            # Initialize talker stage (text to speech tokens)
 
-            from vllm_omni.model_executor.models.cosyvoice3.llm import CosyVoice3LM, Qwen2Encoder
+            from vllm_omni.model_executor.models.cosyvoice3.cosyvoice3_talker import CosyVoice3LM, Qwen2Encoder
 
             llm = Qwen2Encoder(os.path.join(self.model_dir, self.config.llm["llm"]["pretrain_path"]))
             self.text_speech_lm_model = CosyVoice3LM(
@@ -287,8 +287,8 @@ class CosyVoice3Model(
             )
             self.llm_cache = None
             self.model = self.text_speech_lm_model
-        elif self.model_stage == "chunk_aware_flow_matching":
-            # Initialize chunk aware flow matching stage
+        elif self.model_stage == "code2wav":
+            # Initialize code2wav stage (flow matching + vocoder)
             from omegaconf import DictConfig
 
             from vllm_omni.model_executor.models.cosyvoice3.dit import DiT
@@ -369,7 +369,7 @@ class CosyVoice3Model(
     def compute_logits(self, hidden_states: torch.Tensor | OmniOutput) -> torch.Tensor | None:
         if isinstance(hidden_states, OmniOutput):
             hidden_states = hidden_states.text_hidden_states
-        if self.model_stage == "text_speech_lm":
+        if self.model_stage == "talker":
             logits = self.model.llm_decoder(hidden_states)
             vocab_size = self.config.vocab_size
             pad_size = vocab_size - logits.size(-1)
@@ -384,7 +384,7 @@ class CosyVoice3Model(
             raise RuntimeError(f"embed_input_ids is only valid for {self.model_stage}.")
 
     def embed_multimodal(self, **kwargs: object) -> torch.Tensor:
-        if self.model_stage == "text_speech_lm":
+        if self.model_stage == "talker":
             self.speech_token = kwargs["speech_token"]
             self.embedding = kwargs["embedding"]
             self.speech_feat = kwargs["speech_feat"]
@@ -398,7 +398,7 @@ class CosyVoice3Model(
         multimodal_embeddings=None,
         is_multimodal=None,
     ) -> torch.Tensor:
-        if self.model_stage == "text_speech_lm":
+        if self.model_stage == "talker":
             if is_multimodal is not None and any(is_multimodal):
                 embed_tokens = self.model.llm.model.model.embed_tokens(input_ids)
                 sos = self.model.speech_embedding.weight[self.model.sos].reshape(1, -1)
@@ -412,7 +412,7 @@ class CosyVoice3Model(
             else:
                 embed_tokens = self.model.speech_embedding.weight[input_ids]
             return embed_tokens
-        elif self.model_stage == "chunk_aware_flow_matching":
+        elif self.model_stage == "code2wav":
             assert input_ids.dim() == 1
             hidden = int(self.config.hidden_size)
             return torch.zeros(
@@ -430,7 +430,7 @@ class CosyVoice3Model(
         additional_information: dict[str, object] | None = None,
         **kwargs: object,
     ) -> OmniOutput:
-        if self.model_stage == "text_speech_lm":
+        if self.model_stage == "talker":
             if inputs_embeds is None and input_ids is not None:
                 raise Exception(f"inputs_embeds {input_ids} {inputs_embeds}")
 
@@ -458,7 +458,7 @@ class CosyVoice3Model(
                 }
 
             return OmniOutput(text_hidden_states=hidden_states, multimodal_outputs=multimodal_outputs)
-        elif self.model_stage == "chunk_aware_flow_matching":
+        elif self.model_stage == "code2wav":
             runtime_info = kwargs.get("runtime_additional_information", [])
 
             if not runtime_info:
@@ -531,13 +531,13 @@ class CosyVoice3Model(
             raise ValueError(f"Stop it! {input_ids}")
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        if self.model_stage == "text_speech_lm":
+        if self.model_stage == "talker":
             # Load weights for text to speech LM stage
             llm_weight_path = os.path.join(self.model_dir, "llm.pt")
             device = next(self.parameters()).device
             self.model.load_state_dict(torch.load(llm_weight_path, map_location=device), strict=True)
             self.model.to(device).eval()
-        elif self.model_stage == "chunk_aware_flow_matching":
+        elif self.model_stage == "code2wav":
             # Load weights for chunk aware flow matching stage
             flow_weight_path = os.path.join(self.model_dir, "flow.pt")
             device = next(self.parameters()).device

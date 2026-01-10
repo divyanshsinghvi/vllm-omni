@@ -35,11 +35,9 @@ from vllm_omni.model_executor.models.cosyvoice3.utils import (
     extract_text_token,
     make_pad_mask,
 )
-from vllm_omni.model_executor.models.qwen3_omni.qwen3_omni import OmniOutput
-from vllm_omni.model_executor.models.qwen3_omni.qwen3_omni_moe_thinker import (
-    MultiModalDataItems,
-    MultiModalKwargsItems,
-)
+from vllm_omni.model_executor.models.output_templates import OmniOutput
+from vllm.multimodal.parse import MultiModalDataItems
+from vllm.multimodal.inputs import MultiModalKwargsItems
 
 logger = init_logger(__name__)
 
@@ -57,28 +55,6 @@ class CosyVoice3MultiModalProcessingInfo(BaseProcessingInfo):
         For now I have kept it None.
         """
         return {"audio": None}
-
-
-############## Util functions
-
-
-# TODO: Need to add checks for this
-def _compute_min_max_len(
-    text_len: torch.Tensor,
-    prompt_text_len: torch.Tensor,
-    min_token_text_ratio: float,
-    max_token_text_ratio: float,
-) -> tuple[int, int]:
-    base_len = text_len - prompt_text_len
-    return int(base_len * min_token_text_ratio), int(base_len * max_token_text_ratio)
-
-
-###############################
-
-"""
-1. step get input prompt and mm_data to return input_ids and tensors.
-2.
-"""
 
 
 class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModalProcessingInfo]):

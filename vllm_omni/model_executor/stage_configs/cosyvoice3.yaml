@@ -1,6 +1,6 @@
 # Stage config for running CosyVoice3 with 2 stage architecture
-# Stage 0: TextSpeech Language Model (text prompt → speech tokens)
-# Stage 1: Chunk aware flow matching (Chunk aware flow matching) and Acoustic Features to Waveform (acoustic features → audio waveform)
+# Stage 0: Talker (text prompt → speech tokens)
+# Stage 1: Code2Wav (flow matching → acoustic features → waveform)
 # Right now I have coded up stage 2 in stage 1 only; can be split in future
 
 stage_args:
@@ -9,7 +9,7 @@ stage_args:
       devices: 0
       max_batch_size: 1
     engine_args:
-      model_stage: text_speech_lm
+      model_stage: talker
       worker_cls: vllm_omni.worker.gpu_ar_worker.GPUARWorker
       scheduler_cls: vllm_omni.core.sched.omni_ar_scheduler.OmniARScheduler
       model_arch: CosyVoice3Model
@@ -29,7 +29,7 @@ stage_args:
       devices: 0
       max_batch_size: 1
     engine_args:
-      model_stage: chunk_aware_flow_matching
+      model_stage: code2wav
       model_arch: CosyVoice3Model
       trust_remote_code: true
       worker_cls: vllm_omni.worker.gpu_generation_worker.GPUGenerationWorker

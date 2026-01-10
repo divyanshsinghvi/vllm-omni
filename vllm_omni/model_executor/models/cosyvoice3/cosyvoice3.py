@@ -12,8 +12,8 @@ from vllm.config.multimodal import BaseDummyOptions
 from vllm.logger import init_logger
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.inputs import MultiModalDataDict, MultiModalFieldConfig
-from vllm.multimodal.parse import MultiModalDataParser
+from vllm.multimodal.inputs import MultiModalDataDict, MultiModalFieldConfig, MultiModalKwargsItems
+from vllm.multimodal.parse import MultiModalDataParser, MultiModalDataItems
 from vllm.multimodal.processing import (
     BaseMultiModalProcessor,
     BaseProcessingInfo,
@@ -36,8 +36,6 @@ from vllm_omni.model_executor.models.cosyvoice3.utils import (
     make_pad_mask,
 )
 from vllm_omni.model_executor.models.output_templates import OmniOutput
-from vllm.multimodal.parse import MultiModalDataItems
-from vllm.multimodal.inputs import MultiModalKwargsItems
 
 logger = init_logger(__name__)
 

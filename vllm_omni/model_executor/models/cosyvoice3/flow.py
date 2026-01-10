@@ -1,37 +1,17 @@
-# Copyright (c) 2024 Alibaba Inc (authors: Xiang Lyu, Zhihao Du)
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# Adopted from  2024 Alibaba Inc (authors: Xiang Lyu, Zhihao Du)
 #               2025 Alibaba Inc (authors: Xiang Lyu, Bofan Zhou)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
 import logging
-import random
 from abc import ABC
 
-import numpy as np
 import torch
 import torch.nn as nn
 from omegaconf import DictConfig
 from torch.nn import functional as F
 
 from vllm_omni.model_executor.models.cosyvoice3.utils import make_pad_mask
-
-
-# TODO: Not sure if it's needed in vllm?
-def set_all_random_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
 
 
 class PreLookaheadLayer(nn.Module):
@@ -242,7 +222,6 @@ class ConditionalCFM(BASECFM):
 class CausalConditionalCFM(ConditionalCFM):
     def __init__(self, in_channels, cfm_params, n_spks=1, spk_emb_dim=64, estimator: torch.nn.Module = None):
         super().__init__(in_channels, cfm_params, n_spks, spk_emb_dim, estimator)
-        set_all_random_seed(0)
         self.rand_noise = torch.randn([1, 80, 50 * 300])
 
     @torch.inference_mode()

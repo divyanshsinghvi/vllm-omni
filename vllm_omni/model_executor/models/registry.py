@@ -48,6 +48,11 @@ _OMNI_MODELS = {
         "qwen3_omni_code2wav",
         "Qwen3OmniMoeCode2Wav",
     ),
+    "IndexTTS2Model": (
+        "indextts2",
+        "indextts2",
+        "IndexTTS2Model",
+    ),
 }
 
 _VLLM_OMNI_MODELS = {

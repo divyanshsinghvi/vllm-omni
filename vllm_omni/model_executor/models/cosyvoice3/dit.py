@@ -1,11 +1,6 @@
-"""
-in notation:
-b - batch
-n - sequence
-nt - text sequence
-nw - raw wave length
-d - dimension
-"""
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# Adopted from https://github.com/FunAudioLLM/CosyVoice/tree/main/cosyvoice/flow/DiT
 
 from __future__ import annotations
 
@@ -19,9 +14,16 @@ from torch import nn
 from vllm.logger import init_logger
 from x_transformers.x_transformers import RotaryEmbedding, apply_rotary_pos_emb
 
-# rotary positional embedding related
-
 logger = init_logger(__name__)
+
+"""
+in notation:
+b - batch
+n - sequence
+nt - text sequence
+nw - raw wave length
+d - dimension
+"""
 
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, theta_rescale_factor=1.0):

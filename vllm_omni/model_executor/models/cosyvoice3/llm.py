@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-# Adopted from  2024 Alibaba Inc (authors: Xiang Lyu, Zhihao Du)
-#               2025 Alibaba Inc (authors: Xiang Lyu, Yabin Li, Qihua, Shengqiang Li)
-
+# Adopted from https://github.com/FunAudioLLM/CosyVoice/blob/main/cosyvoice/llm/llm.py
 from collections.abc import Callable
 
 import torch

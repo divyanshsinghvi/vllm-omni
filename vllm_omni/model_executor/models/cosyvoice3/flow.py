@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-# Adopted from  2024 Alibaba Inc (authors: Xiang Lyu, Zhihao Du)
-#               2025 Alibaba Inc (authors: Xiang Lyu, Bofan Zhou)
+# Adopted from https://github.com/FunAudioLLM/CosyVoice/tree/main/cosyvoice/flow
 
 import logging
 from abc import ABC

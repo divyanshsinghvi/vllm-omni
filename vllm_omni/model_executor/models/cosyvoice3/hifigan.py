@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-# Adopted from https://github.com/FunAudioLLM/CosyVoice
+# Adopted from https://github.com/FunAudioLLM/CosyVoice/tree/main/cosyvoice/hifigan
+# Copyright (c) 2024 Alibaba Inc (authors: Xiang Lyu, Kai Hu)
+
 
 """HIFI-GAN"""
 

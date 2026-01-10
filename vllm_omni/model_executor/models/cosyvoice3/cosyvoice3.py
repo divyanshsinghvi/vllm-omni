@@ -13,7 +13,7 @@ from vllm.logger import init_logger
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import MultiModalDataDict, MultiModalFieldConfig, MultiModalKwargsItems
-from vllm.multimodal.parse import MultiModalDataParser, MultiModalDataItems
+from vllm.multimodal.parse import MultiModalDataItems, MultiModalDataParser
 from vllm.multimodal.processing import (
     BaseMultiModalProcessor,
     BaseProcessingInfo,
@@ -22,8 +22,6 @@ from vllm.multimodal.processing import (
     PromptUpdate,
 )
 from vllm.multimodal.profiling import BaseDummyInputsBuilder, ProcessorInputs
-
-# from vllm.model_executor.models.qwen2 import
 from vllm.sequence import IntermediateTensors
 
 from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
@@ -101,7 +99,6 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
 
         audio = mm_data.get("audio", None)
 
-        # TODO: See where audios is coming from
         if audio is None:
             audio = mm_data.get("audios")
             if audio is not None:
@@ -113,10 +110,6 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
             return BatchFeature({"input_ids": text_token, "input_len": [text_token_len]})
 
         prompt_text = mm_kwargs.get("prompt_text")
-        ## Unsure how to pass prompt text for profiling'
-        # cannot pass text in mm_data so need to have a workaround.
-        # For now if audio is present but prompt text is not I can
-        # return at above only?
 
         if not isinstance(prompt_text, str):
             raise ValueError(f"prompt text is None : {prompt_text}")
@@ -147,17 +140,14 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
         speech_feat, speech_feat_len = extract_speech_feat(audio, self.feat_extractor, device)
 
         if config.sample_rate == 24000:
-            # cosyvoice2, force speech_feat % speech_token = 2
             token_len = min(int(speech_feat.shape[1] / 2), speech_token.shape[1])
             speech_feat, speech_feat_len[:] = speech_feat[:, : 2 * token_len], 2 * token_len
             speech_token, speech_token_len[:] = speech_token[:, :token_len], token_len
 
         embedding = extract_spk_embedding(audio, self.campplus_session, device)
 
-        # input_ids = input_ids
         ft = BatchFeature(
             {
-                # "tts_prompt_text":[[prompt]], "speech_prompt_text": [[prompt_text]],
                 "input_ids": input_ids,
                 "input_len": [input_len],
                 "text_len": [text_token_len],
@@ -197,8 +187,6 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
         hf_processor_mm_kwargs: Mapping[str, object],
         tokenization_kwargs: Mapping[str, object],
     ) -> bool:
-        # Weird but here prompt_text is actual text which is referred
-        # as prompt at other places
         return False
 
     def _get_prompt_updates(
@@ -221,11 +209,6 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
                 target=PromptIndexTargets.start(),
                 insertion=insertion_end,
             ),
-            # PromptInsertion(
-            #     modality="audio",
-            #     target=PromptIndexTargets.start(),
-            #     insertion=insertion_start
-            # )
         ]
 
     def _get_data_parser(self) -> MultiModalDataParser:
@@ -292,8 +275,7 @@ class CosyVoice3Model(
 
             from vllm_omni.model_executor.models.cosyvoice3.llm import CosyVoice3LM, Qwen2Encoder
 
-            # os.path.join(model_dir,
-            llm = Qwen2Encoder(os.path.join(self.model_dir, self.config.llm["llm"]["pretrain_path"]))  # .eval()
+            llm = Qwen2Encoder(os.path.join(self.model_dir, self.config.llm["llm"]["pretrain_path"]))
             self.text_speech_lm_model = CosyVoice3LM(
                 llm_input_size=self.config.llm["llm_input_size"],
                 llm_output_size=self.config.llm["llm_output_size"],
@@ -302,7 +284,7 @@ class CosyVoice3Model(
                 length_normalized_loss=self.config.llm["length_normalized_loss"],
                 lsm_weight=self.config.llm["lsm_weight"],
                 mix_ratio=self.config.llm["mix_ratio"],
-            )  # .eval()
+            )
             self.llm_cache = None
             self.model = self.text_speech_lm_model
         elif self.model_stage == "chunk_aware_flow_matching":
@@ -458,8 +440,6 @@ class CosyVoice3Model(
             batch, seq_len, _ = inputs_embeds.shape
             if seq_len > 1:
                 self.llm_cache = None
-            # hidden_states, _ = self.model.llm(inputs_embeds, seq_lens)
-            # hidden_states, self.llm_cache = self.model.llm.forward_correct(inputs_embeds, seq_lens, self.llm_cache)
 
             if self.llm_cache is not None:
                 seq_len += self.llm_cache[0][0].shape[2]
@@ -493,7 +473,6 @@ class CosyVoice3Model(
             embedding = self.model.spk_embed_affine_layer(embedding)
 
             prompt_token = runtime_info[0]["speech_token"][0].to(device=device)
-            # TODO: Is it better to replace EOS with random token or remove the last token.
             # This is done to remove the last eos token.
             input_ids = input_ids[..., :-1]
 

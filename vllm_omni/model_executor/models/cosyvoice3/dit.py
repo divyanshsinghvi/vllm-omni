@@ -41,7 +41,6 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, theta_resca
 
 
 def get_pos_embed_indices(start, length, max_pos, scale=1.0):
-    # length = length if isinstance(length, int) else length.max()
     scale = scale * torch.ones_like(start, dtype=torch.float32)  # in case scale is a scalar
     pos = (
         start.unsqueeze(1)

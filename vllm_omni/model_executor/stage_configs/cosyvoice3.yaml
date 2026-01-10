@@ -16,7 +16,6 @@ stage_args:
       trust_remote_code: true
       gpu_memory_utilization: 0.4
       engine_output_type: latent  # Output speech tokens for chunk aware flow matching
-      tokenizer: pretrained_models/Fun-CosyVoice3-0.5B/CosyVoice-BlankEN
       disable_hybrid_kv_cache_manager: true
       enable_prefix_caching: false
       enforce_eager: true
@@ -36,7 +35,6 @@ stage_args:
       scheduler_cls: vllm_omni.core.sched.omni_generation_scheduler.OmniGenerationScheduler
       engine_output_type: latent
       gpu_memory_utilization: 0.2
-      tokenizer: pretrained_models/Fun-CosyVoice3-0.5B/CosyVoice-BlankEN
       enforce_eager: true
       disable_hybrid_kv_cache_manager: true
       enable_prefix_caching: false

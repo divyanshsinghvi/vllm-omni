@@ -276,7 +276,7 @@ class CosyVoice3Model(
             from vllm_omni.model_executor.models.cosyvoice3.cosyvoice3_talker import CosyVoice3LM, Qwen2Encoder
 
             llm = Qwen2Encoder(os.path.join(self.model_dir, self.config.llm["llm"]["pretrain_path"]))
-            self.text_speech_lm_model = CosyVoice3LM(
+            self.talker = CosyVoice3LM(
                 llm_input_size=self.config.llm["llm_input_size"],
                 llm_output_size=self.config.llm["llm_output_size"],
                 speech_token_size=self.config.llm["speech_token_size"],
@@ -286,7 +286,7 @@ class CosyVoice3Model(
                 mix_ratio=self.config.llm["mix_ratio"],
             )
             self.llm_cache = None
-            self.model = self.text_speech_lm_model
+            self.model = self.talker
         elif self.model_stage == "code2wav":
             # Initialize code2wav stage (flow matching + vocoder)
             from omegaconf import DictConfig

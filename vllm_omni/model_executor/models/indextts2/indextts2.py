@@ -305,7 +305,7 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
             self.talker = UnifiedVoice(**self.cfg.gpt)
 
             logger.info("Unified Voice")
-
+            self.stop_mel_token = self.cfg.gpt["stop_mel_token"]
             pass
 
     def forward(
@@ -430,11 +430,45 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
             print("codes")
             print(codes)
             print(speech_conditioning_latent)
+
+            # code_lens = torch.tensor([codes.shape[-1]], device=codes.device, dtype=codes.dtype)
+            code_lens = []
+            max_code_len = 0
+            for code in codes:
+                if self.stop_mel_token not in code:
+                    code_len = len(code)
+                else:
+                    len_ = (code == self.stop_mel_token).nonzero(as_tuple=False)[0]
+                    code_len = len_[0].item() if len_.numel() > 0 else len(code)
+                code_lens.append(code_len)
+                max_code_len = max(max_code_len, code_len)
+            codes = codes[:, :max_code_len]
+            code_lens = torch.LongTensor(code_lens)
+            code_lens = code_lens.to(self.device)
+
+            use_speed = torch.zeros(spk_cond_emb.size(0)).to(spk_cond_emb.device).long()
+            # with torch.amp.autocast(text_tokens.device.type, enabled=self.dtype is not None, dtype=self.dtype):
+            latent = self.talker(
+                speech_conditioning_latent,
+                text_token_ids,
+                torch.tensor([text_token_ids.shape[-1]], device=text_token_ids.device),
+                codes,
+                torch.tensor([codes.shape[-1]], device=text_token_ids.device),
+                emo_cond_emb,
+                cond_mel_lengths=torch.tensor([spk_cond_emb.shape[-1]], device=text_token_ids.device),
+                emo_cond_mel_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=text_token_ids.device),
+                emo_vec=emovec,
+                use_speed=use_speed,
+            )
+
             multimodal_outputs = {
-                "codes": codes,
+                "latent": latent,
                 "speech_conditioning_latent": speech_conditioning_latent,
             }
-            return OmniOutput(text_hidden_states=None, multimodal_outputs=multimodal_outputs)
+
+            print(f"multimodal_outputs {multimodal_outputs}")
+
+            return OmniOutput(text_hidden_states=multimodal_outputs["latent"], multimodal_outputs=multimodal_outputs)
 
         else:
             raise Exception("Oops")

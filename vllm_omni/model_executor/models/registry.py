@@ -53,7 +53,13 @@ _OMNI_MODELS = {
         "cosyvoice3",
         "CosyVoice3Model",
     ),
+    "Qwen3TTSForConditionalGeneration": (
+        "qwen3_tts",
+        "qwen3_tts",
+        "Qwen3TTSModelForGeneration",
+    ),
 }
+
 
 _VLLM_OMNI_MODELS = {
     **_VLLM_MODELS,

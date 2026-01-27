@@ -19,7 +19,7 @@ stage_args:
       stage_configs_path: vllm_omni/model_executor/stage_configs/indextts2.yaml
       tokenizer_mode: indextts2
       tokenizer: pretrained_models/IndexTTS2
-      gpu_memory_utilization: 0.4
+      gpu_memory_utilization: 0.2
       enable_prefix_caching: false
       disable_hybrid_kv_cache_manager: true
       enforce_eager: true
@@ -37,7 +37,19 @@ stage_args:
       scheduler_cls: vllm_omni.core.sched.omni_generation_scheduler.OmniGenerationScheduler
       model_arch: IndexTTS2Model
       trust_remote_code: true
+      config_format: indextts2_yaml
       stage_configs_path: vllm_omni/model_executor/stage_configs/indextts2.yaml
-
+      tokenizer_mode: indextts2
+      tokenizer: pretrained_models/IndexTTS2
+      gpu_memory_utilization: 0.7
+      runner: "generate"  # Explicitly mark as generative model
+      dtype: "float16"
+      skip_mm_profiling: true
+      mm_processor_cache_gb: 0
+      enable_prefix_caching: false
+      disable_hybrid_kv_cache_manager: true
+      enforce_eager: true
+    engine_input_source: [0]
+    custom_process_input_func: vllm_omni.model_executor.stage_input_processors.indextts2.gpt2s2mel
     final_output: true
     final_output_type: latent

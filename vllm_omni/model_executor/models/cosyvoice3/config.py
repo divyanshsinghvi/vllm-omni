@@ -10,6 +10,8 @@ class CosyVoice3Config(PretrainedConfig):
         self.llm_input_size = 896
         self.llm_output_size = 896
         self.hidden_size = self.llm_output_size
+        self.num_attention_heads = 14
+        self.num_hidden_layers = 24
         self.spk_embed_dim = 192
         self.token_frame_rate = 25
         self.token_mel_ratio = 2

@@ -262,6 +262,7 @@ class CosyVoice3Model(
 ):
     supports_multimodal_raw_input_only = True
     supports_multimodal = True
+    requires_raw_input_tokens = True
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
@@ -388,9 +389,11 @@ class CosyVoice3Model(
             self.speech_token = kwargs["speech_token"]
             self.embedding = kwargs["embedding"]
             self.speech_feat = kwargs["speech_feat"]
-            return self.speech_token
+            self.speech_token_len = self.speech_token.shape[1]
+            speech_token_emb = self.model.speech_embedding(self.speech_token)
+            return speech_token_emb
         else:
-            raise RuntimeError(f"embed_input_ids is only valid for {self.model_stage}.")
+            raise RuntimeError(f"embed_multimodal is only valid for {self.model_stage}.")
 
     def embed_input_ids(
         self,
@@ -403,9 +406,8 @@ class CosyVoice3Model(
                 embed_tokens = self.model.llm.model.model.embed_tokens(input_ids)
                 sos = self.model.speech_embedding.weight[self.model.sos].reshape(1, -1)
                 task_id = self.model.speech_embedding.weight[self.model.task_id].reshape(1, -1)
-                pstoken = multimodal_embeddings[0][0]
-                pstoken_len = len(pstoken)
-                prompt_speech_token_emb = self.model.speech_embedding(pstoken)
+                prompt_speech_token_emb = multimodal_embeddings[0]
+                pstoken_len = prompt_speech_token_emb.shape[0]  # Get length from tensor shape
                 embed_tokens = torch.cat(
                     [sos, embed_tokens[2 + pstoken_len :], task_id, prompt_speech_token_emb], dim=0
                 )
@@ -468,11 +470,11 @@ class CosyVoice3Model(
 
             d = next(self.parameters())
             device, dtype = d.device, d.dtype
-            embedding = runtime_info[0]["embedding"][0].to(device=device, dtype=dtype)
+            embedding = runtime_info[0]["embedding"][:1].to(device=device, dtype=dtype)
             embedding = F.normalize(embedding, dim=1)
             embedding = self.model.spk_embed_affine_layer(embedding)
 
-            prompt_token = runtime_info[0]["speech_token"][0].to(device=device)
+            prompt_token = runtime_info[0]["speech_token"][:1].to(device=device)
             # This is done to remove the last eos token.
             input_ids = input_ids[..., :-1]
 
@@ -486,7 +488,7 @@ class CosyVoice3Model(
             mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
             token = self.model.input_embedding(torch.clamp(token, min=0)) * mask
             # text encode
-            prompt_feat = runtime_info[0]["speech_feat"][0]
+            prompt_feat = runtime_info[0]["speech_feat"][:1]
 
             h = self.model.pre_lookahead_layer(token)
             h = h.repeat_interleave(self.model.token_mel_ratio, dim=1)

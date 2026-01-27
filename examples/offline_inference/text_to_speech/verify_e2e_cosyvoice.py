@@ -4,9 +4,9 @@ import os
 import librosa
 import numpy as np
 import soundfile as sf
-from vllm import SamplingParams
 from vllm.assets.audio import AudioAsset
 
+from vllm import SamplingParams
 from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
 from vllm_omni.model_executor.models.cosyvoice3.tokenizer import get_qwen_tokenizer
@@ -60,6 +60,7 @@ def run_e2e():
         trust_remote_code=True,
         log_file=args.log_file,
         tokenizer=args.tokenizer,
+        log_stats=True,  # Enable profiling/stats logging
     )
 
     # Map CosyVoice sampling config into vLLM SamplingParams for stage 0.

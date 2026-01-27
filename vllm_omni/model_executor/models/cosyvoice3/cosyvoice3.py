@@ -506,7 +506,6 @@ class CosyVoice3Model(
                 spks=embedding,
                 cond=conds,
                 n_timesteps=10,
-                streaming=False,
             )
 
             feat = feat[:, :, mel_len1:]

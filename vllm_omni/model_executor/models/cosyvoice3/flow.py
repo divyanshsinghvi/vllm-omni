@@ -136,7 +136,7 @@ class ConditionalCFM(BASECFM):
             t_span = 1 - torch.cos(t_span * 0.5 * torch.pi)
         return self.solve_euler(z, t_span=t_span, mu=mu, mask=mask, spks=spks, cond=cond), cache
 
-    def solve_euler(self, x, t_span, mu, mask, spks, cond, streaming=False):
+    def solve_euler(self, x, t_span, mu, mask, spks, cond):
         """
         Fixed euler solver for ODEs.
         Args:
@@ -175,7 +175,7 @@ class ConditionalCFM(BASECFM):
             t_in[:] = t.unsqueeze(0)
             spks_in[0] = spks
             cond_in[0] = cond
-            dphi_dt = self.forward_estimator(x_in, mask_in, mu_in, t_in, spks_in, cond_in, streaming)
+            dphi_dt = self.forward_estimator(x_in, mask_in, mu_in, t_in, spks_in, cond_in)
             dphi_dt, cfg_dphi_dt = torch.split(dphi_dt, [x.size(0), x.size(0)], dim=0)
             dphi_dt = (1.0 + self.inference_cfg_rate) * dphi_dt - self.inference_cfg_rate * cfg_dphi_dt
             x = x + dt * dphi_dt
@@ -186,9 +186,9 @@ class ConditionalCFM(BASECFM):
 
         return sol[-1].float()
 
-    def forward_estimator(self, x, mask, mu, t, spks, cond, streaming=False):
+    def forward_estimator(self, x, mask, mu, t, spks, cond):
         if isinstance(self.estimator, torch.nn.Module):
-            return self.estimator(x, mask, mu, t, spks, cond, streaming=streaming)
+            return self.estimator(x, mask, mu, t, spks, cond)
         else:
             [estimator, stream], trt_engine = self.estimator.acquire_estimator()
             # NOTE need to synchronize when switching stream
@@ -224,7 +224,7 @@ class CausalConditionalCFM(ConditionalCFM):
         self.rand_noise = torch.randn([1, 80, 50 * 300])
 
     @torch.inference_mode()
-    def forward(self, mu, mask, n_timesteps, temperature=1.0, spks=None, cond=None, streaming=False):
+    def forward(self, mu, mask, n_timesteps, temperature=1.0, spks=None, cond=None):
         """Forward diffusion
 
         Args:
@@ -251,7 +251,7 @@ class CausalConditionalCFM(ConditionalCFM):
         if self.t_scheduler == "cosine":
             t_span = 1 - torch.cos(t_span * 0.5 * torch.pi)
 
-        return self.solve_euler(z, t_span=t_span, mu=mu, mask=mask, spks=spks, cond=cond, streaming=streaming), None
+        return self.solve_euler(z, t_span=t_span, mu=mu, mask=mask, spks=spks, cond=cond), None
 
 
 class CausalMaskedDiffWithDiT(torch.nn.Module):
@@ -320,7 +320,6 @@ class CausalMaskedDiffWithDiT(torch.nn.Module):
         prompt_feat,
         prompt_feat_len,
         embedding,
-        streaming,
         finalize,
     ):
         assert token.shape[0] == 1
@@ -360,7 +359,6 @@ class CausalMaskedDiffWithDiT(torch.nn.Module):
             spks=embedding,
             cond=conds,
             n_timesteps=10,
-            streaming=streaming,
         )
 
         feat = feat[:, :, mel_len1:]

@@ -402,11 +402,8 @@ class CosyVoice3Model(
 
     def embed_multimodal(self, **kwargs: object) -> torch.Tensor:
         if self.model_stage == "talker":
-            self.speech_token = kwargs["speech_token"]
-            self.embedding = kwargs["embedding"]
-            self.speech_feat = kwargs["speech_feat"]
-            self.speech_token_len = self.speech_token.shape[1]
-            speech_token_emb = self.model.speech_embedding(self.speech_token)
+            speech_token = kwargs["speech_token"]
+            speech_token_emb = self.model.speech_embedding(speech_token)
             return speech_token_emb
         else:
             raise RuntimeError(f"embed_multimodal is only valid for {self.model_stage}.")
@@ -457,11 +454,12 @@ class CosyVoice3Model(
 
             multimodal_outputs = {}
 
-            if hasattr(self, "speech_token"):
+            if "speech_token" in kwargs:
+                # Wrap in lists to pass through gpu_ar_model_runner shape filtering
                 multimodal_outputs = {
-                    "speech_token": self.speech_token,
-                    "embedding": self.embedding,
-                    "speech_feat": self.speech_feat,
+                    "speech_token": [kwargs.get("speech_token")],
+                    "speech_feat": [kwargs.get("speech_feat")],
+                    "embedding": [kwargs.get("embedding")],
                 }
 
             return OmniOutput(text_hidden_states=hidden_states, multimodal_outputs=multimodal_outputs)

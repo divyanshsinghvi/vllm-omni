@@ -75,7 +75,18 @@ def run_e2e():
     if args.audio_path:
         if not os.path.exists(args.audio_path):
             raise FileNotFoundError(f"Audio file not found: {args.audio_path}")
-        audio_signal, sr = librosa.load(args.audio_path, sr=24000)
+        # Load at native sample rate
+        audio_signal, sr = librosa.load(args.audio_path, sr=None)
+
+        # Validate sample rate before processing (similar to original CosyVoice)
+        min_sr = 16000
+        if sr < min_sr:
+            raise ValueError(
+                f"Audio sample rate {sr} Hz is too low. "
+                f"Minimum required: {min_sr} Hz. "
+                f"Please provide audio with sample rate >= {min_sr} Hz."
+            )
+
         audio_data = (audio_signal.astype(np.float32), sr)
     else:
         audio_data = AudioAsset("mary_had_lamb").audio_and_sample_rate

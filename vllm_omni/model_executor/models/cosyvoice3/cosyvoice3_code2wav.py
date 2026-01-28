@@ -19,15 +19,15 @@ from torch.nn import functional as F
 from vllm.logger import init_logger
 
 from vllm_omni.diffusion.models.cosyvoice3_audio.cosyvoice3_dit import DiT
-from vllm_omni.model_executor.models.cosyvoice3.code2wav_core.flow import (
+from vllm_omni.model_executor.models.cosyvoice3.code2wav_core.cfm import (
     CausalConditionalCFM,
     CausalMaskedDiffWithDiT,
-    PreLookaheadLayer,
 )
 from vllm_omni.model_executor.models.cosyvoice3.code2wav_core.hifigan import (
     CausalConvRNNF0Predictor,
     CausalHiFTGenerator,
 )
+from vllm_omni.model_executor.models.cosyvoice3.code2wav_core.layers import PreLookaheadLayer
 from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
 from vllm_omni.model_executor.models.cosyvoice3.utils import make_pad_mask
 

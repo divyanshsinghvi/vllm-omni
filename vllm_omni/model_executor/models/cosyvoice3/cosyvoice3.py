@@ -281,80 +281,19 @@ class CosyVoice3Model(
             self.model = self.talker
         elif self.model_stage == "code2wav":
             # Initialize code2wav stage (flow matching + vocoder)
-            from omegaconf import DictConfig
+            from vllm_omni.model_executor.models.cosyvoice3.cosyvoice3_code2wav import CosyVoice3Code2Wav
 
-            from vllm_omni.diffusion.models.cosyvoice3_audio.cosyvoice3_dit import DiT
-            from vllm_omni.model_executor.models.cosyvoice3.flow import (
-                CausalConditionalCFM,
-                CausalMaskedDiffWithDiT,
-                PreLookaheadLayer,
-            )
+            self.code2wav = CosyVoice3Code2Wav(self.config)
+            self.model = self.code2wav.flow_model
+            self.hift = self.code2wav.hift
 
-            # Initialize acoustic features to waveform stage
-            from vllm_omni.model_executor.models.cosyvoice3.hifigan import CausalConvRNNF0Predictor, CausalHiFTGenerator
-
-            pre_lookahead_layer = PreLookaheadLayer(**self.config.flow["pre_lookahead_layer"])
-
-            decoder_cfg = self.config.flow["decoder"]
-            cfm_params = DictConfig(decoder_cfg["cfm_params"])
-            estimator = DiT(**decoder_cfg["estimator"])
-            decoder = CausalConditionalCFM(
-                in_channels=decoder_cfg["in_channels"],
-                estimator=estimator,
-                cfm_params=cfm_params,
-                n_spks=decoder_cfg["n_spks"],
-                spk_emb_dim=decoder_cfg["spk_emb_dim"],
-            )
-            self.chunk_aware_flow_matching_model = CausalMaskedDiffWithDiT(
-                input_size=self.config.flow["input_size"],
-                output_size=self.config.flow["output_size"],
-                spk_embed_dim=self.config.flow["spk_embed_dim"],
-                output_type=self.config.flow["output_type"],
-                vocab_size=self.config.flow["vocab_size"],
-                input_frame_rate=self.config.flow["input_frame_rate"],
-                only_mask_loss=self.config.flow["only_mask_loss"],
-                token_mel_ratio=self.config.flow["token_mel_ratio"],
-                pre_lookahead_len=self.config.flow["pre_lookahead_len"],
-                pre_lookahead_layer=pre_lookahead_layer,
-                decoder=decoder,
-            )
-            self.model = self.chunk_aware_flow_matching_model
-
-            f0_predictor = CausalConvRNNF0Predictor(
-                num_class=self.config.hift["f0_predictor"]["num_class"],
-                in_channels=self.config.hift["f0_predictor"]["in_channels"],
-                cond_channels=self.config.hift["f0_predictor"]["cond_channels"],
-            )
-            self.hift = CausalHiFTGenerator(
-                in_channels=self.config.hift["in_channels"],
-                base_channels=self.config.hift["base_channels"],
-                nb_harmonics=self.config.hift["nb_harmonics"],
-                sampling_rate=self.config.hift["sampling_rate"],
-                nsf_alpha=self.config.hift["nsf_alpha"],
-                nsf_sigma=self.config.hift["nsf_sigma"],
-                nsf_voiced_threshold=self.config.hift["nsf_voiced_threshold"],
-                upsample_rates=self.config.hift["upsample_rates"],
-                upsample_kernel_sizes=self.config.hift["upsample_kernel_sizes"],
-                istft_params=self.config.hift["istft_params"],
-                resblock_kernel_sizes=self.config.hift["resblock_kernel_sizes"],
-                resblock_dilation_sizes=self.config.hift["resblock_dilation_sizes"],
-                source_resblock_kernel_sizes=self.config.hift["source_resblock_kernel_sizes"],
-                source_resblock_dilation_sizes=self.config.hift["source_resblock_dilation_sizes"],
-                lrelu_slope=self.config.hift["lrelu_slope"],
-                audio_limit=self.config.hift["audio_limit"],
-                conv_pre_look_right=self.config.hift["conv_pre_look_right"],
-                f0_predictor=f0_predictor,
-            )
-            # Run hift in float32 to avoid dtype mismatches in internal ops.
-            self.hift = self.hift.float()
-            self.token_overlap_len = 20
-            self.mel_overlap_len = int(
-                self.token_overlap_len / self.chunk_aware_flow_matching_model.input_frame_rate * 22050 / 256
-            )
-            self.mel_window = np.hamming(2 * self.mel_overlap_len)
-            self.mel_cache_len = 20
-            self.source_cache_len = int(self.mel_cache_len * 256)
-            self.speech_window = np.hamming(2 * self.source_cache_len)
+            # Expose streaming parameters
+            self.token_overlap_len = self.code2wav.token_overlap_len
+            self.mel_overlap_len = self.code2wav.mel_overlap_len
+            self.mel_window = self.code2wav.mel_window
+            self.mel_cache_len = self.code2wav.mel_cache_len
+            self.source_cache_len = self.code2wav.source_cache_len
+            self.speech_window = self.code2wav.speech_window
         else:
             raise ValueError(f"Model stage not supported {self.model_stage}")
 

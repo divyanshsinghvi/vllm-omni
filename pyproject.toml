@@ -200,6 +200,7 @@ extend-ignore-identifiers-re = [
     ".*nothink.*",
     ".*NOTHINK.*",
     ".*nin.*",
+    "Ono_Anna",
 ]
 [tool.typos.default.extend-words]
 ue = "ue"

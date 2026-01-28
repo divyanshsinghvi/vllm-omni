@@ -7,7 +7,6 @@ stage_args:
   - stage_id: 0
     runtime:
       devices: 0
-      max_batch_size: 1
     engine_args:
       model_stage: talker
       worker_cls: vllm_omni.worker.gpu_ar_worker.GPUARWorker
@@ -26,7 +25,6 @@ stage_args:
   - stage_id: 1
     runtime:
       devices: 0
-      max_batch_size: 1
     engine_args:
       model_stage: code2wav
       model_arch: CosyVoice3Model

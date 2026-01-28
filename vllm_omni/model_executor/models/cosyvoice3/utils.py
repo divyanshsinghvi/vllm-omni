@@ -69,7 +69,12 @@ def load_wav(wav, target_sr, min_sr=16000):
             speech = torch.tensor([speech], dtype=torch.float32)
 
     if sample_rate != target_sr:
-        assert sample_rate >= min_sr, f"wav sample rate {sample_rate} must be greater than {target_sr}"
+        if sample_rate < min_sr:
+            raise ValueError(
+                f"Audio sample rate {sample_rate} Hz is too low. "
+                f"Minimum required: {min_sr} Hz, target: {target_sr} Hz. "
+                f"Please provide audio with sample rate >= {min_sr} Hz."
+            )
         speech = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=target_sr)(speech)
 
     speech = speech.to(dtype=torch.float32)

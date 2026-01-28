@@ -242,39 +242,26 @@ class CosyVoice3Code2Wav(nn.Module):
 
         return tts_speech
 
-    def load_weights(self, model_dir: str, device: torch.device) -> set[str]:
+    def load_weights(self, model_dir: str, device: torch.device) -> None:
         """Load flow.pt and hift.pt weights.
 
         Args:
             model_dir: Model directory containing flow.pt and hift.pt
             device: Device to load weights to
-
-        Returns:
-            Set of loaded weight names
         """
         import os
 
-        loaded_keys = set()
-
         # Load flow weights
         flow_path = os.path.join(model_dir, "flow.pt")
-        if os.path.exists(flow_path):
-            flow_checkpoint = torch.load(flow_path, map_location=device)
-            flow_weights = {}
-            for name, weight in flow_checkpoint.items():
-                # Map decoder.estimator weights
-                flow_weights[name] = weight
-                loaded_keys.add(name)
-            self.flow_model.load_state_dict(flow_weights, strict=False)
-            logger.info(f"Loaded flow weights from {flow_path}")
+        self.flow_model.load_state_dict(torch.load(flow_path, map_location=device), strict=True)
+        self.flow_model.to(device).eval()
+        logger.info(f"Loaded flow weights from {flow_path}")
 
         # Load hift weights
         hift_path = os.path.join(model_dir, "hift.pt")
-        if os.path.exists(hift_path):
-            hift_checkpoint = torch.load(hift_path, map_location=device)
-            self.hift.load_state_dict(hift_checkpoint, strict=False)
-            for name in hift_checkpoint:
-                loaded_keys.add(f"hift.{name}")
-            logger.info(f"Loaded hift weights from {hift_path}")
-
-        return loaded_keys
+        hift_state_dict = {
+            k.replace("generator.", ""): v for k, v in torch.load(hift_path, map_location=device).items()
+        }
+        self.hift.load_state_dict(hift_state_dict, strict=True)
+        self.hift.to(device).eval()
+        logger.info(f"Loaded hift weights from {hift_path}")

@@ -283,7 +283,7 @@ class CosyVoice3Model(
             # Initialize code2wav stage (flow matching + vocoder)
             from omegaconf import DictConfig
 
-            from vllm_omni.model_executor.models.cosyvoice3.dit import DiT
+            from vllm_omni.diffusion.models.cosyvoice3_audio.cosyvoice3_dit import DiT
             from vllm_omni.model_executor.models.cosyvoice3.flow import (
                 CausalConditionalCFM,
                 CausalMaskedDiffWithDiT,

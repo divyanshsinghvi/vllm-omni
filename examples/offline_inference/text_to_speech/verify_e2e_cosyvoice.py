@@ -4,9 +4,9 @@ import os
 import librosa
 import numpy as np
 import soundfile as sf
+from vllm import SamplingParams
 from vllm.assets.audio import AudioAsset
 
-from vllm import SamplingParams
 from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
 from vllm_omni.model_executor.models.cosyvoice3.tokenizer import get_qwen_tokenizer
@@ -128,8 +128,20 @@ def run_e2e():
 
     sampling_params_list = [gpt_sampling, s2mel_sampling]
 
+    # Start profiling (requires VLLM_TORCH_PROFILER_DIR env var)
+    if os.environ.get("VLLM_TORCH_PROFILER_DIR"):
+        print("Starting profiler...")
+        omni.start_profile()
+
     # Generate (Omni orchestrator requires a per-stage SamplingParams list)
     outputs = list(omni.generate(prompts, sampling_params_list=sampling_params_list[:2]))
+
+    # Stop profiling and get results
+    if os.environ.get("VLLM_TORCH_PROFILER_DIR"):
+        print("Stopping profiler...")
+        profile_results = omni.stop_profile()
+        print(f"Profile traces saved to: {profile_results}")
+
     print(outputs)
     # Verify outputs
     print(f"Received {len(outputs)} outputs.")

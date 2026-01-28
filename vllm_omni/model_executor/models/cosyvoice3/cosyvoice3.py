@@ -462,7 +462,7 @@ class CosyVoice3Model(
             return OmniOutput(text_hidden_states=hidden_states, multimodal_outputs=multimodal_outputs)
         elif self.model_stage == "code2wav":
             runtime_info = kwargs.get("runtime_additional_information", [])
-
+            logger.info(f"runtime_info: {runtime_info}")
             if not runtime_info:
                 length = 30 * 24000
                 audio = np.zeros((length,))
@@ -522,7 +522,10 @@ class CosyVoice3Model(
             #     tts_mel = F.interpolate(tts_mel, size=int(tts_mel.shape[2] / speed), mode="linear")
             hift_weight = self.hift.m_source.l_linear.weight
             tts_mel = tts_mel.to(device=hift_weight.device, dtype=hift_weight.dtype)
-            tts_speech, _ = self.hift.inference(speech_feat=tts_mel)
+            if tts_mel.shape[-1] == 0:
+                tts_speech = torch.zeros((tts_mel.shape[0], 1, 0), device=tts_mel.device, dtype=tts_mel.dtype)
+            else:
+                tts_speech, _ = self.hift.inference(speech_feat=tts_mel)
 
             return OmniOutput(
                 text_hidden_states=None,

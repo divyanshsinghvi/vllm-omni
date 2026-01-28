@@ -149,8 +149,6 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
         ft = BatchFeature(
             {
                 "input_ids": input_ids,
-                "input_len": [input_len],
-                "text_len": [text_token_len],
                 "speech_feat": speech_feat,
                 "speech_token": speech_token,
                 "speech_token_len": [speech_token_len],
@@ -166,8 +164,6 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
         hf_processor_mm_kwargs: Mapping[str, object],
     ) -> Mapping[str, MultiModalFieldConfig]:
         return {
-            "input_len": MultiModalFieldConfig.batched("audio"),
-            "text_len": MultiModalFieldConfig.batched("audio"),
             "speech_feat": MultiModalFieldConfig.batched("audio"),
             "speech_token": MultiModalFieldConfig.batched("audio"),
             "speech_token_len": MultiModalFieldConfig.batched("audio"),

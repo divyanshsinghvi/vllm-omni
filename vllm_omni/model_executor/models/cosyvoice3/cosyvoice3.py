@@ -273,10 +273,10 @@ class CosyVoice3Model(
         self.model = None
         if self.model_stage == "talker":
             # Initialize talker stage (text to speech tokens)
+            from vllm_omni.model_executor.models.cosyvoice3.cosyvoice3_talker import CosyVoice3LM, VLLMQwen2Encoder
 
-            from vllm_omni.model_executor.models.cosyvoice3.cosyvoice3_talker import CosyVoice3LM, Qwen2Encoder
-
-            llm = Qwen2Encoder(os.path.join(self.model_dir, self.config.llm["llm"]["pretrain_path"]))
+            llm_vllm_config = self._create_llm_vllm_config(vllm_config)
+            llm = VLLMQwen2Encoder(vllm_config=llm_vllm_config, prefix="model")
             self.talker = CosyVoice3LM(
                 llm_input_size=self.config.llm["llm_input_size"],
                 llm_output_size=self.config.llm["llm_output_size"],
@@ -286,7 +286,8 @@ class CosyVoice3Model(
                 lsm_weight=self.config.llm["lsm_weight"],
                 mix_ratio=self.config.llm["mix_ratio"],
             )
-            self.llm_cache = None
+            # KV cache is now managed externally by vLLM's PagedAttention
+            # No need for self.llm_cache
             self.model = self.talker
         elif self.model_stage == "code2wav":
             # Initialize code2wav stage (flow matching + vocoder)
@@ -367,6 +368,21 @@ class CosyVoice3Model(
         else:
             raise ValueError(f"Model stage not supported {self.model_stage}")
 
+    def _create_llm_vllm_config(self, parent_config: VllmConfig) -> VllmConfig:
+        """Create VllmConfig for the inner Qwen2 LLM.
+
+        This creates a modified VllmConfig with the Qwen2 HF config loaded from
+        the pretrained model directory. The cache config is inherited from the parent
+        to enable PagedAttention with the same memory configuration.
+        """
+        from transformers import Qwen2Config
+
+        qwen_config_path = os.path.join(self.model_dir, self.config.llm["llm"]["pretrain_path"])
+        qwen_hf_config = Qwen2Config.from_pretrained(qwen_config_path)
+
+        # Use parent's cache config - critical for PagedAttention to work correctly
+        return parent_config.with_hf_config(qwen_hf_config, architectures=["Qwen2Model"])
+
     def compute_logits(self, hidden_states: torch.Tensor | OmniOutput) -> torch.Tensor | None:
         if isinstance(hidden_states, OmniOutput):
             hidden_states = hidden_states.text_hidden_states
@@ -403,7 +419,7 @@ class CosyVoice3Model(
     ) -> torch.Tensor:
         if self.model_stage == "talker":
             if is_multimodal is not None and any(is_multimodal):
-                embed_tokens = self.model.llm.model.model.embed_tokens(input_ids)
+                embed_tokens = self.model.llm.model.embed_tokens(input_ids)
                 sos = self.model.speech_embedding.weight[self.model.sos].reshape(1, -1)
                 task_id = self.model.speech_embedding.weight[self.model.task_id].reshape(1, -1)
                 prompt_speech_token_emb = multimodal_embeddings[0]
@@ -436,19 +452,8 @@ class CosyVoice3Model(
             if inputs_embeds is None and input_ids is not None:
                 raise Exception(f"inputs_embeds {input_ids} {inputs_embeds}")
 
-            # Ensure [B, T, C]
-            if inputs_embeds.dim() == 2:
-                inputs_embeds = inputs_embeds.unsqueeze(0)
-            batch, seq_len, _ = inputs_embeds.shape
-            if seq_len > 1:
-                self.llm_cache = None
-
-            if self.llm_cache is not None:
-                seq_len += self.llm_cache[0][0].shape[2]
-            masks = torch.tril(torch.ones((1, seq_len, seq_len), device=inputs_embeds.device)).to(torch.bool)
-            hidden_states, self.llm_cache = self.model.llm.forward_one_step(inputs_embeds, masks, cache=self.llm_cache)
-            ## TODO Shift to vllm attention backed
-            hidden_states = hidden_states.squeeze(0)
+            # [total_tokens, hidden]
+            hidden_states = self.model.llm(inputs_embeds, positions)
 
             multimodal_outputs = {}
 
@@ -536,10 +541,38 @@ class CosyVoice3Model(
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         if self.model_stage == "talker":
-            # Load weights for text to speech LM stage
+            # Load weights for text to speech LM stage using vLLM's weight loading
             llm_weight_path = os.path.join(self.model_dir, "llm.pt")
             device = next(self.parameters()).device
-            self.model.load_state_dict(torch.load(llm_weight_path, map_location=device), strict=True)
+            checkpoint = torch.load(llm_weight_path, map_location=device)
+
+            # 1. Load Qwen2 model weights into vLLM's Qwen2Model
+            # The checkpoint has prefix "llm.model.model." for the transformer weights
+            # vLLM's Qwen2Model expects just the model structure without extra prefixes
+            qwen_weights = []
+            for name, weight in checkpoint.items():
+                if name.startswith("llm.model.model."):
+                    # Strip prefix: llm.model.model.X -> X (for vLLM's Qwen2Model)
+                    vllm_name = name.replace("llm.model.model.", "")
+                    qwen_weights.append((vllm_name, weight))
+
+            # Use vLLM's built-in load_weights which handles stacked params
+            # (q_proj+k_proj+v_proj -> qkv_proj, gate_proj+up_proj -> gate_up_proj)
+            self.model.llm.model.load_weights(iter(qwen_weights))
+
+            # 2. Load CosyVoice3LM-specific weights (speech_embedding, llm_decoder)
+            speech_emb_state = {
+                k.replace("speech_embedding.", ""): v
+                for k, v in checkpoint.items()
+                if k.startswith("speech_embedding.")
+            }
+            self.model.speech_embedding.load_state_dict(speech_emb_state)
+
+            llm_decoder_state = {
+                k.replace("llm_decoder.", ""): v for k, v in checkpoint.items() if k.startswith("llm_decoder.")
+            }
+            self.model.llm_decoder.load_state_dict(llm_decoder_state)
+
             self.model.to(device).eval()
         elif self.model_stage == "code2wav":
             # Load weights for chunk aware flow matching stage

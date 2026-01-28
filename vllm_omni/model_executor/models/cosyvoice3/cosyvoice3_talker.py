@@ -5,10 +5,48 @@ from collections.abc import Callable
 
 import torch
 from torch import nn
-from transformers import Qwen2ForCausalLM
+from vllm.config import VllmConfig
+from vllm.model_executor.models.qwen2 import Qwen2Model
 
-# from vllm.model_executor.models.qwen2 import Qwen2ForCausalLM
-from vllm_omni.model_executor.models.cosyvoice3.utils import make_pad_mask
+
+class VLLMQwen2Encoder(torch.nn.Module):
+    """Qwen2 encoder using vLLM's Qwen2Model with external KV cache management.
+
+    This replaces the HuggingFace Qwen2ForCausalLM with vLLM's optimized implementation
+    that uses PagedAttention and external KV cache via ForwardContext.
+    """
+
+    def __init__(self, vllm_config: VllmConfig, prefix: str = ""):
+        super().__init__()
+        self.model = Qwen2Model(vllm_config=vllm_config, prefix=prefix)
+        self.hidden_size = vllm_config.model_config.hf_config.hidden_size
+
+    def forward(self, inputs_embeds: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
+        """Forward pass using vLLM's attention with external KV cache.
+
+        Args:
+            inputs_embeds: Input embeddings [total_tokens, hidden_size] or [batch, seq, hidden]
+            positions: Position tensor for RoPE [total_tokens]
+
+        Returns:
+            hidden_states: Output hidden states [total_tokens, hidden_size]
+        """
+        # vLLM model expects flattened tensors [total_tokens, hidden_size]
+        if inputs_embeds.dim() == 3:
+            inputs_flat = inputs_embeds.view(-1, self.hidden_size)
+        else:
+            inputs_flat = inputs_embeds
+        positions_flat = positions.view(-1)
+
+        # KV cache managed externally via ForwardContext (set by GPUARModelRunner)
+        # input_ids is required but ignored when inputs_embeds is provided
+        hidden_states = self.model(
+            input_ids=torch.zeros(inputs_flat.size(0), dtype=torch.long, device=inputs_flat.device),
+            positions=positions_flat,
+            intermediate_tensors=None,
+            inputs_embeds=inputs_flat,
+        )
+        return hidden_states
 
 
 class TransformerLM(torch.nn.Module):
@@ -44,40 +82,6 @@ class TransformerLM(torch.nn.Module):
         # 3. [Optional] build speech token related modules
         self.speech_embedding = torch.nn.Embedding(speech_token_size, llm_input_size)
         self.spk_embed_affine_layer = torch.nn.Linear(spk_embed_dim, llm_input_size)
-
-
-class Qwen2Encoder(torch.nn.Module):
-    def __init__(self, pretrain_path):
-        super().__init__()
-        self.model = Qwen2ForCausalLM.from_pretrained(pretrain_path)
-
-    def forward(self, xs: torch.Tensor, xs_lens: torch.Tensor):
-        T = xs.size(1)
-        masks = ~make_pad_mask(xs_lens, T)
-        outs = self.model(
-            inputs_embeds=xs,
-            attention_mask=masks,
-            output_hidden_states=True,
-            return_dict=True,
-        )
-        return outs.hidden_states[-1], masks.unsqueeze(1)
-
-    def forward_one_step(self, xs, masks, cache=None):
-        past_len = 0 if cache is None else cache[0][0].size(2)
-        total_len = past_len + xs.size(1)
-        input_masks = torch.ones((xs.size(0), total_len), device=xs.device, dtype=torch.bool)
-
-        outs = self.model(
-            inputs_embeds=xs,
-            attention_mask=input_masks,
-            output_hidden_states=True,
-            return_dict=True,
-            use_cache=True,
-            past_key_values=cache,
-        )
-        xs = outs.hidden_states[-1]
-        new_cache = outs.past_key_values
-        return xs, new_cache
 
 
 class Qwen2LM(TransformerLM):

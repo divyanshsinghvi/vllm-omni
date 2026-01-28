@@ -5,7 +5,6 @@ from functools import partial
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.nn import functional as F
 from transformers.feature_extraction_utils import BatchFeature
 from vllm.config import VllmConfig
 from vllm.config.multimodal import BaseDummyOptions
@@ -31,7 +30,6 @@ from vllm_omni.model_executor.models.cosyvoice3.utils import (
     extract_speech_token,
     extract_spk_embedding,
     extract_text_token,
-    make_pad_mask,
 )
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 
@@ -399,64 +397,17 @@ class CosyVoice3Model(
                 audio = np.zeros((length,))
                 return OmniOutput(text_hidden_states=None, multimodal_outputs={"audio": audio})
 
-            d = next(self.parameters())
-            device, dtype = d.device, d.dtype
-            embedding = runtime_info[0]["embedding"][:1].to(device=device, dtype=dtype)
-            embedding = F.normalize(embedding, dim=1)
-            embedding = self.model.spk_embed_affine_layer(embedding)
+            # Remove the last eos token and add batch dimension
+            token = input_ids[..., :-1].unsqueeze(0)
 
-            prompt_token = runtime_info[0]["speech_token"][:1].to(device=device)
-            # This is done to remove the last eos token.
-            input_ids = input_ids[..., :-1]
-
-            token = input_ids.unsqueeze(0).to(device=device)
-            token_len1, token_len2 = prompt_token.shape[1], token.shape[1]
-            # Build length tensors for pad mask logic.
-            prompt_token_len = torch.tensor([token_len1], device=token.device, dtype=torch.int32)
-            token_len = torch.tensor([token_len2], device=token.device, dtype=torch.int32)
-            token = torch.concat([prompt_token, token], dim=1)
-            token_len = prompt_token_len + token_len
-            mask = (~make_pad_mask(token_len)).unsqueeze(-1).to(embedding)
-            token = self.model.input_embedding(torch.clamp(token, min=0)) * mask
-            # text encode
-            prompt_feat = runtime_info[0]["speech_feat"][:1]
-
-            h = self.model.pre_lookahead_layer(token)
-            h = h.repeat_interleave(self.model.token_mel_ratio, dim=1)
-            mel_len1, mel_len2 = prompt_feat.shape[1], h.shape[1] - prompt_feat.shape[1]
-
-            # get conditions
-            conds = torch.zeros([1, mel_len1 + mel_len2, self.model.output_size], device=token.device).to(h.dtype)
-
-            conds[:, :mel_len1] = prompt_feat
-
-            conds = conds.transpose(1, 2)
-
-            mask = (~make_pad_mask(torch.tensor([mel_len1 + mel_len2]))).to(h)
-            feat, _ = self.model.decoder(
-                mu=h.transpose(1, 2).contiguous(),
-                mask=mask.unsqueeze(1),
-                spks=embedding,
-                cond=conds,
+            # Generate audio using code2wav
+            tts_speech = self.code2wav(
+                token=token,
+                prompt_token=runtime_info[0]["speech_token"][:1],
+                prompt_feat=runtime_info[0]["speech_feat"][:1],
+                embedding=runtime_info[0]["embedding"][:1],
                 n_timesteps=10,
             )
-
-            feat = feat[:, :, mel_len1:]
-
-            tts_mel = feat
-
-            token_offset = 0
-            tts_mel = tts_mel[:, :, token_offset * self.model.token_mel_ratio :]
-
-            # TODO Add speed control later
-            # if speed != 1.0:
-            #     tts_mel = F.interpolate(tts_mel, size=int(tts_mel.shape[2] / speed), mode="linear")
-            hift_weight = self.hift.m_source.l_linear.weight
-            tts_mel = tts_mel.to(device=hift_weight.device, dtype=hift_weight.dtype)
-            if tts_mel.shape[-1] == 0:
-                tts_speech = torch.zeros((tts_mel.shape[0], 1, 0), device=tts_mel.device, dtype=tts_mel.dtype)
-            else:
-                tts_speech, _ = self.hift.inference(speech_feat=tts_mel)
 
             return OmniOutput(
                 text_hidden_states=None,

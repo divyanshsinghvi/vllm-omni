@@ -12,7 +12,6 @@ import torch.nn as nn
 from vllm.logger import init_logger
 
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
-from vllm_omni.diffusion.attention.backends.flash_attn import FlashAttentionImpl
 from vllm_omni.diffusion.attention.backends.sdpa import SDPABackend
 from vllm_omni.diffusion.attention.parallel import build_parallel_attention_strategy
 from vllm_omni.diffusion.attention.parallel.ring import RingParallelAttention
@@ -114,9 +113,9 @@ class Attention(nn.Module):
         return out
 
     def _run_local_attention(self, query, key, value, attn_metadata):
-        if isinstance(self.attention, FlashAttentionImpl) and query.dtype == torch.float32:
+        if query.dtype == torch.float32:
             logger.warning_once(
-                "Flash Attention does not support float32. Overriding user config "
+                f"Only SDPA supports float32. Overriding user config {type(self.attention)} "
                 f"attention_backend='{self.backend_pref}' to 'sdpa' for dtype={query.dtype}."
             )
             return self.sdpa_fallback.forward(query, key, value, attn_metadata)

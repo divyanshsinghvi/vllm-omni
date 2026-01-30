@@ -4,11 +4,6 @@ from typing import Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers.generation.logits_process import (
-    LogitsProcessorList,
-    TopKLogitsWarper,
-    TopPLogitsWarper,
-)
 from transformers.models.qwen3_omni_moe.configuration_qwen3_omni_moe import (
     Qwen3OmniMoeTalkerConfig,
 )
@@ -24,7 +19,6 @@ from vllm.model_executor.layers.linear import ReplicatedLinear
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.models.interfaces import (
     MultiModalEmbeddings,
-    SupportsMultiModal,
     SupportsPP,
 )
 from vllm.model_executor.models.qwen2_5_omni_thinker import (
@@ -68,7 +62,7 @@ Qwen3OmniMoeThinkerDummyInputsBuilder = Qwen2_5OmniThinkerDummyInputsBuilder
 )
 class Qwen3OmniMoeTalkerForConditionalGeneration(
     nn.Module,
-    SupportsMultiModal,
+    # SupportsMultiModal,
     SupportsPP,
     Qwen3OmniMoeConditionalGenerationMixin,
 ):
@@ -141,7 +135,10 @@ class Qwen3OmniMoeTalkerForConditionalGeneration(
         self.code_predictor = Qwen3OmniMoeTalkerCodePredictor(
             vllm_config=vllm_config, prefix=maybe_prefix(prefix, "code_predictor")
         )
-        self.empty_code = torch.empty((1, 0), dtype=torch.long)
+        self.layer0_embed_buffer = torch.zeros(
+            (vllm_config.scheduler_config.max_num_seqs, 1, self.config.text_config.hidden_size),
+            dtype=vllm_config.model_config.dtype,
+        )
 
     def code_predictor_forward(
         self,
@@ -193,68 +190,18 @@ class Qwen3OmniMoeTalkerForConditionalGeneration(
         all_codes_per_position = []
         middle_hidden_states = []  # Collect hidden states for each position
 
-        logits_processors = LogitsProcessorList(
-            [
-                TopKLogitsWarper(top_k=top_k),
-                TopPLogitsWarper(top_p=top_p),
-            ]
-        )
         # Generate residual layers for each position
         for pos in range(seq_len):
             layer0_code = input_ids[:, pos : pos + 1]  # [batch, 1]
 
-            # Predict all residual layers (layers 1 to num_code_groups-1) autoregressively
-            pos_codes = [layer0_code]  # Start with layer 0: [batch, 1]
-
             # Initial input: [last_talker_hidden, layer0_embed]
             layer0_embed = self.embed_input_ids(layer0_code)
-            prev_embed = layer0_embed  # Track previous layer embedding
-            try:
-                current_input = torch.cat([last_talker_hidden, prev_embed], dim=1)  # [batch, 2, hidden_size]
-            except Exception as e:
-                print(f"Error in current_input: {e}")
-                print(f"last_talker_hidden shape: {last_talker_hidden.shape}")
-                print(f"prev_embed shape: {prev_embed.shape}")
-                raise e
-
-            for layer_idx in range(self.num_code_groups - 1):
-                # Input for this layer: [last_talker_hidden, prev_layer_embed]
-
-                # Forward through code_predictor model
-                outputs = self.code_predictor.model(
-                    inputs_embeds=current_input,
-                    attention_mask=None,
-                    position_ids=None,
-                    past_key_values=None,
-                    use_cache=False,
-                    cache_position=None,
-                )
-
-                hidden_state = outputs.last_hidden_state  # [batch, 2, hidden_size]
-
-                # Use the corresponding lm_head for this layer
-                logits = self.code_predictor.lm_head[layer_idx](hidden_state[:, -1:, :])  # [batch, 1, vocab_size]
-
-                if len(pos_codes) > 1:
-                    input_ids_for_logits_processors = torch.cat(pos_codes[1:], dim=1).to(
-                        device=logits.device, dtype=torch.long
-                    )
-                else:
-                    input_ids_for_logits_processors = self.empty_code
-                logits = logits_processors(input_ids_for_logits_processors, logits.squeeze(0)).unsqueeze(0)
-
-                # Sample from the filtered distribution
-                probs = F.softmax(logits, dim=-1)
-                code = torch.multinomial(probs.squeeze(1), num_samples=1)  # [batch, 1]
-                pos_codes.append(code)
-
-                # Update prev_embed for next layer (if not last layer)
-                # layer_idx=0 predicts layer 1, embed with codec_embedding[1]
-                new_embed = self.code_predictor.model.codec_embedding[layer_idx](code)  # [batch, 1, hidden_size]
-                current_input = torch.cat([current_input, new_embed], dim=1)  # [batch, 3~n, hidden_size]
+            self.layer0_embed_buffer[:batch_size].copy_(layer0_embed)
+            pos_all_layers, current_input = self.code_predictor(
+                layer0_code, self.layer0_embed_buffer[:batch_size], last_talker_hidden
+            )
 
             # Stack all layers for this position: [batch, num_code_groups, 1]
-            pos_all_layers = torch.stack(pos_codes, dim=1)  # [batch, num_code_groups, 1]
             all_codes_per_position.append(pos_all_layers)
             middle_hidden_states.append(current_input[:, 2:-1, :])
 
@@ -289,7 +236,7 @@ class Qwen3OmniMoeTalkerForConditionalGeneration(
             all_summed_embeddings.append(pos_summed)
 
         # Concatenate across positions: [batch, seq_len, hidden_size]
-        summed_embeddings = torch.cat(all_summed_embeddings, dim=1)
+        summed_embeddings = torch.cat(all_summed_embeddings, dim=1).squeeze(1)
 
         return result_codes, summed_embeddings
 
@@ -430,9 +377,16 @@ class Qwen3OmniMoeTalkerForConditionalGeneration(
         if not mm_input_by_modality:
             return []
 
+        logger.warning(
+            "\n\n\n"
+            "THIS FUNCTION RETURNS DUMMY MULTIMODAL EMBEDDINGS FOR PROFILE RUN, "
+            "SHOULD NOT BE CALLED IN INFERENCE."
+            "\n\n\n"
+        )
+
         # The result multimodal_embeddings is tuple of tensors, with each
         # tensor correspoending to a multimodal data item (image or video).
-        multimodal_embeddings: tuple[torch.Tensor, ...] = ()
+        dummy_multimodal_embeddings: tuple[torch.Tensor, ...] = ()
 
         # NOTE: It is important to iterate over the keys in this dictionary
         # to preserve the order of the modalities.
@@ -441,22 +395,44 @@ class Qwen3OmniMoeTalkerForConditionalGeneration(
             multimodal_input = mm_input_by_modality[modality]
             if modality == "image":
                 image_embeddings = self._process_image_input(multimodal_input)
-                image_embeddings = self.hidden_projection(image_embeddings)
-                multimodal_embeddings += tuple(image_embeddings)
+                dummy_image_embeddings = ()
+                for image_embed in image_embeddings:
+                    dummy_image_embeddings += (
+                        torch.zeros(
+                            image_embed.shape[0],
+                            self.config.text_config.hidden_size,
+                            device=image_embed.device,
+                            dtype=torch.bfloat16,
+                        ),
+                    )
+                dummy_multimodal_embeddings += tuple(image_embeddings)
             if modality == "video":
                 video_embeddings = self._process_video_input(multimodal_input)
-                video_video_embeddings_project = ()
+                dummy_video_video_embeddings = ()
                 for video_embed in video_embeddings:
-                    proj = nn.Linear(8192, 2048).to(device=video_embed.device, dtype=torch.bfloat16)
-                    video_embed = proj(video_embed)
-                    video_embed_project = self.hidden_projection(video_embed)
-                    video_video_embeddings_project += (video_embed_project,)
-                multimodal_embeddings += tuple(video_video_embeddings_project)
+                    dummy_video_video_embeddings += (
+                        torch.zeros(
+                            video_embed.shape[0],
+                            self.config.text_config.hidden_size,
+                            device=video_embed.device,
+                            dtype=torch.bfloat16,
+                        ),
+                    )
+                dummy_multimodal_embeddings += tuple(dummy_video_video_embeddings)
             if modality == "audio":
                 audio_embeddings = self._process_audio_input(multimodal_input)
-                audio_embeddings = self.hidden_projection(audio_embeddings)
-                multimodal_embeddings += tuple(audio_embeddings)
-        return multimodal_embeddings
+                dummy_audio_embeddings = ()
+                for audio_embed in audio_embeddings:
+                    dummy_audio_embeddings += (
+                        torch.zeros(
+                            audio_embed.shape[0],
+                            self.config.text_config.hidden_size,
+                            device=audio_embed.device,
+                            dtype=torch.bfloat16,
+                        ),
+                    )
+                dummy_multimodal_embeddings += tuple(dummy_audio_embeddings)
+        return dummy_multimodal_embeddings
 
     def embed_input_ids(
         self,
@@ -497,7 +473,7 @@ class Qwen3OmniMoeTalkerForConditionalGeneration(
                 str(device),
             )
         except Exception:
-            pass
+            logger.error("Error logging model load summary")
 
         multi_model_weights = set()
         for name, param in self.visual.named_parameters():
@@ -541,7 +517,10 @@ class Qwen3OmniMoeTalkerSharedExpertWrapper(nn.Module):
     - mlp.shared_expert.{gate_proj, up_proj, down_proj}.weight
     - mlp.shared_expert_gate.weight  (sibling, not child)
 
-    The wrapper applies: sigmoid(shared_expert_gate(x)) * shared_expert(x)
+    The wrapper applies: sigmoid(shared_expert_gate(x)) * shared_expert(x).
+
+    It also exposes the underlying shared_expert interface to keep
+    compatibility with backends that split shared-expert computation.
     """
 
     def __init__(
@@ -553,9 +532,30 @@ class Qwen3OmniMoeTalkerSharedExpertWrapper(nn.Module):
         self._shared_expert = shared_expert
         self._shared_expert_gate = shared_expert_gate
 
+    @property
+    def gate_up_proj(self):
+        return self._shared_expert.gate_up_proj
+
+    @property
+    def down_proj(self):
+        return self._shared_expert.down_proj
+
+    @property
+    def act_fn(self):
+        return self._shared_expert.act_fn
+
+    def expert_gate(self, x: torch.Tensor):
+        gate_out = self._shared_expert_gate(x)
+        if isinstance(gate_out, tuple):
+            return gate_out
+        return gate_out, None
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self._shared_expert(x)
-        gate_values = F.sigmoid(self._shared_expert_gate(x))  # [batch, 1]
+        gate_out = self._shared_expert_gate(x)
+        if isinstance(gate_out, tuple):
+            gate_out = gate_out[0]
+        gate_values = F.sigmoid(gate_out)  # [batch, 1]
         return gate_values * out  # Broadcasting: [batch, 1] * [batch, hidden]
 
 

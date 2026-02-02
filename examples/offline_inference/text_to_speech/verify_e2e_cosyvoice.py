@@ -19,7 +19,8 @@ def run_e2e():
     parser.add_argument(
         "--model",
         type=str,
-        default="pretrained_models/Fun-CosyVoice3-0.5B/",
+        required=True,
+        help="Path to CosyVoice3 model directory (e.g., pretrained_models/Fun-CosyVoice3-0.5B/).",
     )
     parser.add_argument("--stage-config", type=str, default="vllm_omni/model_executor/stage_configs/cosyvoice3.yaml")
     parser.add_argument("--prompt", type=str, default="Hello, this is a test of the CosyVoice system capability.")
@@ -32,13 +33,8 @@ def run_e2e():
     parser.add_argument(
         "--tokenizer",
         type=str,
-        default="pretrained_models/Fun-CosyVoice3-0.5B/CosyVoice-BlankEN",
-    )
-    parser.add_argument(
-        "--log-file",
-        type=str,
-        default="/mnt/d/omni_logs",
-        help="Log file path prefix (e.g., /tmp/omni_logs).",
+        required=True,
+        help="Path to tokenizer directory (e.g., <model_path>/CosyVoice-BlankEN).",
     )
     args = parser.parse_args()
     # Ensure tokenizer directory exists
@@ -58,9 +54,8 @@ def run_e2e():
         model=args.model,
         stage_configs_path=args.stage_config,
         trust_remote_code=True,
-        log_file=args.log_file,
         tokenizer=args.tokenizer,
-        log_stats=True,  # Enable profiling/stats logging
+        log_stats=True,
     )
 
     # Map CosyVoice sampling config into vLLM SamplingParams for stage 0.

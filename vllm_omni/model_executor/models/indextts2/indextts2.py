@@ -135,6 +135,10 @@ class IndexTTS2MultiModalProcessor(BaseMultiModalProcessor[IndexTTS2MultiModalPr
         # print(audio_16k.mean())
         self.extract_features = SeamlessM4TFeatureExtractor.from_pretrained("facebook/w2v-bert-2.0")
         inputs = self.extract_features(audio_16k, sampling_rate=16000, return_tensors="pt")
+        emo_inputs = self.extract_features(emo_audio, sampling_rate=16000, return_tensors="pt")
+
+        del self.extract_features
+
         input_features = inputs["input_features"].to(device)
         attention_mask = inputs["attention_mask"].to(device)
         # logger.info(f"input_features {input_features}")
@@ -142,8 +146,7 @@ class IndexTTS2MultiModalProcessor(BaseMultiModalProcessor[IndexTTS2MultiModalPr
         with torch.inference_mode():
             self.semantic_model = Wav2Vec2BertModel.from_pretrained("facebook/w2v-bert-2.0")
             self.semantic_model.eval()
-            self.semantic_model.to(device)
-            self.semantic_model.eval()
+            self.semantic_model.to(device).eval()
             self.stat_path = os.path.join(self.model_dir, self.config.w2v_stat)
             stat_mean_var = torch.load(self.stat_path)
             self.semantic_mean = stat_mean_var["mean"].to(device)
@@ -151,10 +154,12 @@ class IndexTTS2MultiModalProcessor(BaseMultiModalProcessor[IndexTTS2MultiModalPr
 
             spk_cond_emb = self.get_emb(input_features, attention_mask)
 
-            emo_inputs = self.extract_features(emo_audio, sampling_rate=16000, return_tensors="pt")
             emo_input_features = emo_inputs["input_features"].to(device)
             emo_attention_mask = emo_inputs["attention_mask"].to(device)
+
             emo_cond_emb = self.get_emb(emo_input_features, emo_attention_mask)
+
+            del self.semantic_model
 
             logger.info(f"emo_cond_emb {input_ids.shape}")
             # emo_cond_emb = emo_cond_emb.squeeze()
@@ -178,12 +183,6 @@ class IndexTTS2MultiModalProcessor(BaseMultiModalProcessor[IndexTTS2MultiModalPr
         hf_inputs: "BatchFeature",
         hf_processor_mm_kwargs: Mapping[str, object],
     ) -> Mapping[str, MultiModalFieldConfig]:
-        if "spk_cond_emb" in hf_inputs:
-            logger.info(
-                f"hf_inputs {hf_inputs['spk_cond_emb'].shape} "
-                f"{hf_inputs['emo_cond_emb'].shape} {hf_inputs['emo_weight']}"
-            )
-            logger.info(f"hf_processor_mm_kwargs {hf_processor_mm_kwargs}")
         return {
             "spk_cond_emb": MultiModalFieldConfig.batched("audio"),
             "emo_cond_emb": MultiModalFieldConfig.batched("audio"),
@@ -351,10 +350,10 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
             spk_cond_emb = kwargs.get("spk_cond_emb")
             emo_cond_emb = kwargs.get("emo_cond_emb")
             emo_alpha = kwargs.get("emo_weight")
-            assert spk_cond_emb.dim() == 4
-            assert emo_cond_emb.dim() == 4
-            spk_cond_emb = spk_cond_emb.squeeze(1)
-            emo_cond_emb = emo_cond_emb.squeeze(1)
+            assert spk_cond_emb.dim() == 3, spk_cond_emb.shape
+            assert emo_cond_emb.dim() == 3, emo_cond_emb.shape
+            # spk_cond_emb = spk_cond_emb.squeeze(1)
+            # emo_cond_emb = emo_cond_emb.squeeze(1)
 
             model_param = next(self.talker.parameters())
             target_device = model_param.device
@@ -388,7 +387,7 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
             max_mel_tokens = kwargs.pop("max_mel_tokens", 1500)
 
             text_token_ids = kwargs.get("text_token_ids")
-            text_token_ids = text_token_ids.squeeze(0)
+            # text_token_ids = text_token_ids.squeeze(0)
             self.talker.inference_model.eval().to(dtype=target_dtype)
 
             logger.info(

@@ -13,24 +13,16 @@ snapshot_download('FunAudioLLM/Fun-CosyVoice3-0.5B-2512', local_dir='pretrained_
 ```
 
 Add `config.json` in `pretrained_models/Fun-CosyVoice3-0.5B/`:
-```
+```json
 {
-        "model_type": "cosyvoice3",
-        "architectures": [
-                "CosyVoice3Model"
-        ],
-        "auto_map": {
-              "AutoConfig": "config.CosyVoice3Config"
-        }
+    "model_type": "cosyvoice3",
+    "architectures": [
+        "CosyVoice3Model"
+    ]
 }
 ```
 
-Copy the config class into the model root:
-```
-cp vllm_omni/model_executor/models/cosyvoice3/config.py pretrained_models/Fun-CosyVoice3-0.5B/config.py
-```
-
-Run the offline verification script with the tokenizer subfolder:
+Run the offline verification script:
 ```
 python examples/offline_inference/text_to_speech/verify_e2e_cosyvoice.py \
   --model pretrained_models/Fun-CosyVoice3-0.5B \

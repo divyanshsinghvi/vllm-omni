@@ -66,7 +66,7 @@ def load_wav(wav, target_sr, min_sr=16000):
     else:
         speech, sample_rate = wav
         if isinstance(speech, np.ndarray):
-            speech = torch.tensor([speech], dtype=torch.float32)
+            speech = torch.from_numpy(speech).float().unsqueeze(0)
 
     if sample_rate != target_sr:
         if sample_rate < min_sr:

@@ -26,7 +26,6 @@ from indextts.utils.front import TextNormalizer, TextTokenizer
 # logging.getLogger("WETEXT").setLevel(logging.WARNING)
 # logging.getLogger("WeTextProcessing").setLevel(logging.WARNING)
 # logging.getLogger("indextts").setLevel(logging.WARNING)
-from transformers import SeamlessM4TFeatureExtractor, Wav2Vec2BertModel
 from transformers.feature_extraction_utils import BatchFeature
 from vllm.config import VllmConfig
 from vllm.config.multimodal import BaseDummyOptions
@@ -69,19 +68,6 @@ class IndexTTS2MultiModalProcessingInfo(BaseProcessingInfo):
 
 
 class IndexTTS2MultiModalProcessor(BaseMultiModalProcessor[IndexTTS2MultiModalProcessingInfo]):
-    @torch.no_grad()
-    def get_emb(self, input_features, attention_mask):
-        vq_emb = self.semantic_model(
-            input_features=input_features,
-            attention_mask=attention_mask,
-            output_hidden_states=True,
-        )
-
-        feat = vq_emb.hidden_states[17]  # (B, T, C)
-
-        feat = (feat - self.semantic_mean) / self.semantic_std
-        return feat
-
     def _call_hf_processor(
         self,
         prompt: str,
@@ -102,9 +88,6 @@ class IndexTTS2MultiModalProcessor(BaseMultiModalProcessor[IndexTTS2MultiModalPr
         self.tokenizer = TextTokenizer(self.bpe_path, self.normalizer)
         logger.info(f">> bpe model loaded from: {self.bpe_path}")
 
-        # tokenizer_path = config.tokenizer_path
-        # self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
-
         text_tokens_list = self.tokenizer.tokenize(prompt)
         text_token_ids = self.tokenizer.convert_tokens_to_ids(text_tokens_list)
         input_ids = torch.tensor([text_token_ids], dtype=torch.long, device=device)
@@ -115,66 +98,27 @@ class IndexTTS2MultiModalProcessor(BaseMultiModalProcessor[IndexTTS2MultiModalPr
             return BatchFeature({"input_ids": input_ids})
 
         logger.info(f"{mm_kwargs}")
-        # Currently only one mode for index_tts is supported
-        # emo_mode = mm_kwargs.get("emo_mode")
+        # Get emotion audio and weight from mm_kwargs
         emo_audio, _ = mm_kwargs.get("emo_audio")
         emo_weight = mm_kwargs.get("emo_weight")
 
-        # print(mm_data.get("audios")[0])
+        # Get speaker audio from mm_data
         audio = mm_data.get("audios")[0]
         sr = 22050
-        # print(type(audio))
-        # print(device)
 
-        audio = torch.Tensor(audio)
-        emo_audio = torch.Tensor(emo_audio)
-        # print("Audio")
-        # print(emo_audio.mean())
-        # audio_22k = torchaudio.transforms.Resample(sr, 22050)(audio)
-        audio_16k = torchaudio.transforms.Resample(sr, 16000)(audio)
-        # print(audio_16k.mean())
-        self.extract_features = SeamlessM4TFeatureExtractor.from_pretrained("facebook/w2v-bert-2.0")
-        inputs = self.extract_features(audio_16k, sampling_rate=16000, return_tensors="pt")
-        emo_inputs = self.extract_features(emo_audio, sampling_rate=16000, return_tensors="pt")
+        # Convert to tensors with batch dimension (raw audio - model will extract embeddings)
+        audio = torch.Tensor(audio).unsqueeze(0)  # (1, num_samples)
+        emo_audio = torch.Tensor(emo_audio).unsqueeze(0)  # (1, num_samples)
 
-        del self.extract_features
-
-        input_features = inputs["input_features"].to(device)
-        attention_mask = inputs["attention_mask"].to(device)
-        # logger.info(f"input_features {input_features}")
-
-        with torch.inference_mode():
-            self.semantic_model = Wav2Vec2BertModel.from_pretrained("facebook/w2v-bert-2.0")
-            self.semantic_model.eval()
-            self.semantic_model.to(device).eval()
-            self.stat_path = os.path.join(self.model_dir, self.config.w2v_stat)
-            stat_mean_var = torch.load(self.stat_path)
-            self.semantic_mean = stat_mean_var["mean"].to(device)
-            self.semantic_std = torch.sqrt(stat_mean_var["var"]).to(device)
-
-            spk_cond_emb = self.get_emb(input_features, attention_mask)
-
-            emo_input_features = emo_inputs["input_features"].to(device)
-            emo_attention_mask = emo_inputs["attention_mask"].to(device)
-
-            emo_cond_emb = self.get_emb(emo_input_features, emo_attention_mask)
-
-            del self.semantic_model
-
-            logger.info(f"emo_cond_emb {input_ids.shape}")
-            # emo_cond_emb = emo_cond_emb.squeeze()
-            # spk_cond_emb = spk_cond_emb.squeeze()
-
-            # logger.info(f"emo_cond_emb {input_ids.shape}")
-            # logger.info(f"emo_cond_emb {emo_cond_emb.shape}")
-
+        # Return raw audio for model to process (following Qwen3TTS pattern)
         return BatchFeature(
             {
                 "input_ids": input_ids.cpu(),
-                "text_token_ids": input_ids.cpu(),  # extra field
-                "spk_cond_emb": spk_cond_emb.cpu(),
-                "emo_cond_emb": emo_cond_emb.cpu(),
-                "emo_weight": torch.tensor([emo_weight]),
+                "text_token_ids": input_ids.cpu(),
+                "audio": audio.cpu(),
+                "emo_audio": emo_audio.cpu(),
+                "emo_weight": torch.tensor([[emo_weight]]),  # (1, 1)
+                "sample_rate": torch.tensor([[sr]]),  # (1, 1)
             }
         )
 
@@ -184,10 +128,11 @@ class IndexTTS2MultiModalProcessor(BaseMultiModalProcessor[IndexTTS2MultiModalPr
         hf_processor_mm_kwargs: Mapping[str, object],
     ) -> Mapping[str, MultiModalFieldConfig]:
         return {
-            "spk_cond_emb": MultiModalFieldConfig.batched("audio"),
-            "emo_cond_emb": MultiModalFieldConfig.batched("audio"),
+            "audio": MultiModalFieldConfig.batched("audio", keep_on_cpu=True),
+            "emo_audio": MultiModalFieldConfig.batched("audio", keep_on_cpu=True),
             "emo_weight": MultiModalFieldConfig.batched("audio"),
             "text_token_ids": MultiModalFieldConfig.batched("audio"),
+            "sample_rate": MultiModalFieldConfig.batched("audio", keep_on_cpu=True),
         }
 
     def _hf_processor_applies_updates(
@@ -246,6 +191,7 @@ class IndexTTS2DummyInputsBuilder(BaseDummyInputsBuilder[IndexTTS2MultiModalProc
                 prompt_sample_rate,
             ),
         }
+        # return mm_data
         # TODO: Return this instead of mm_data
         print(mm_data)
         import librosa
@@ -291,7 +237,7 @@ class IndexTTS2DummyInputsBuilder(BaseDummyInputsBuilder[IndexTTS2MultiModalProc
 )
 class IndexTTS2Model(nn.Module, SupportsMultiModal):
     supports_multimodal = True
-    supports_multimodal_raw_input_only = True
+    # supports_multimodal_raw_input_only = False
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
@@ -310,6 +256,12 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
 
             logger.info("Unified Voice")
             self.stop_mel_token = self.cfg.gpt["stop_mel_token"]
+
+            # Auxiliary models for speaker embedding extraction (initialized in load_weights)
+            self.semantic_model = None
+            self.feature_extractor = None
+            self.semantic_mean = None
+            self.semantic_std = None
         elif self.model_stage == "s2mel":
             from types import SimpleNamespace
 
@@ -335,32 +287,31 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
         **kwargs: object,
     ) -> OmniOutput:
         if self.model_stage == "gpt":
+            # Get raw audio from processor (following Qwen3TTS pattern)
+            audio = kwargs.get("audio")
+            emo_audio = kwargs.get("emo_audio")
+            sr = kwargs.get("sample_rate")[0, 0].item()
+            emo_alpha = kwargs.get("emo_weight")
+
             logger.info(
                 f"input_ids {input_ids} positions {positions}"
                 f"intermediate_tensors {intermediate_tensors}"
                 f"inputs_embeds {inputs_embeds} "
                 f"additional_information {additional_information}"
-                f"kwargs {kwargs['emo_weight'].shape}"
-                f"kwargs {kwargs['spk_cond_emb'].shape}"
-                f"kwargs {kwargs['emo_cond_emb'].shape}"
-                # f"kwargs {kwargs}"
+                f"kwargs audio shape: {audio.shape if audio is not None else None}"
+                f"kwargs emo_audio shape: {emo_audio.shape if emo_audio is not None else None}"
             )
 
-            # return inputs_embeds
-            spk_cond_emb = kwargs.get("spk_cond_emb")
-            emo_cond_emb = kwargs.get("emo_cond_emb")
-            emo_alpha = kwargs.get("emo_weight")
+            # Extract embeddings from raw audio using pre-loaded semantic_model
+            spk_cond_emb = self.extract_speaker_embedding(audio, int(sr))
+            emo_cond_emb = self.extract_speaker_embedding(emo_audio, int(sr))
+
             assert spk_cond_emb.dim() == 3, spk_cond_emb.shape
             assert emo_cond_emb.dim() == 3, emo_cond_emb.shape
-            # spk_cond_emb = spk_cond_emb.squeeze(1)
-            # emo_cond_emb = emo_cond_emb.squeeze(1)
 
             model_param = next(self.talker.parameters())
             target_device = model_param.device
             target_dtype = model_param.dtype
-            print("Hello")
-            print(target_dtype)
-            print(target_device)
 
             spk_cond_emb = spk_cond_emb.to(device=target_device, dtype=target_dtype)
             emo_cond_emb = emo_cond_emb.to(device=target_device, dtype=target_dtype)
@@ -538,6 +489,72 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
             return self.talker.text_embedding(input_ids)
         raise NotImplementedError(f"embed_input_ids not implemented for stage {self.model_stage}")
 
+    def embed_multimodal(self, **kwargs) -> list[torch.Tensor]:
+        """Process multimodal inputs and return embeddings for encoder cache.
+
+        For IndexTTS2, this extracts speaker embeddings from raw audio.
+        """
+        if self.model_stage != "gpt":
+            return []
+
+        audio = kwargs.get("audio")
+        emo_audio = kwargs.get("emo_audio")
+        sample_rate = kwargs.get("sample_rate")
+
+        if audio is None:
+            return []
+
+        sr = sample_rate[0, 0].item() if sample_rate is not None else 22050
+
+        # Extract embeddings from raw audio
+        spk_cond_emb = self.extract_speaker_embedding(audio, int(sr))
+        emo_cond_emb = self.extract_speaker_embedding(emo_audio, int(sr)) if emo_audio is not None else spk_cond_emb
+
+        # Return as list (one item per batch element)
+        # Concatenate speaker and emotion embeddings for caching
+        combined = torch.cat([spk_cond_emb, emo_cond_emb], dim=1)
+        return [combined]
+
+    def extract_speaker_embedding(self, audio: torch.Tensor, sr: int = 22050) -> torch.Tensor:
+        """Extract speaker embedding using semantic model.
+
+        Args:
+            audio: Raw audio tensor (1D or 2D with batch dim)
+            sr: Sample rate of the input audio (default 22050)
+
+        Returns:
+            Speaker embedding tensor of shape (B, T, C)
+        """
+        # Resample to 16kHz if needed
+        if sr != 16000:
+            audio_16k = torchaudio.transforms.Resample(sr, 16000)(audio)
+        else:
+            audio_16k = audio
+
+        # Extract features using feature extractor
+        # Convert to numpy for the feature extractor
+        if audio_16k.dim() == 1:
+            audio_np = audio_16k.cpu().numpy()
+        else:
+            audio_np = audio_16k.squeeze().cpu().numpy()
+
+        inputs = self.feature_extractor(audio_np, sampling_rate=16000, return_tensors="pt")
+        model_dtype = next(self.semantic_model.parameters()).dtype
+        input_features = inputs["input_features"].to(device=self.device, dtype=model_dtype)
+        attention_mask = inputs["attention_mask"].to(self.device)
+
+        # Get embeddings from semantic model
+        with torch.inference_mode():
+            outputs = self.semantic_model(
+                input_features=input_features,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
+            )
+            feat = outputs.hidden_states[17]  # (B, T, C)
+            feat = (feat - self.semantic_mean) / self.semantic_std
+
+        return feat
+
     def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Required by vLLM to recognize this as a generative model."""
         return None
@@ -567,6 +584,21 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
             # TODO : Fix fp16 / fp32
             logger.info("post init gpt2 config")
             self.talker.post_init_gpt2_config(use_deepspeed=False, kv_cache=False, half=True)
+
+            # Load semantic model for speaker embedding extraction
+            from transformers import SeamlessM4TFeatureExtractor, Wav2Vec2BertModel
+
+            logger.info("Loading Wav2Vec2BertModel for speaker embedding extraction...")
+            self.feature_extractor = SeamlessM4TFeatureExtractor.from_pretrained("facebook/w2v-bert-2.0")
+            self.semantic_model = Wav2Vec2BertModel.from_pretrained("facebook/w2v-bert-2.0", torch_dtype=torch.float16)
+            self.semantic_model.to(self.device).eval()
+            logger.info("Wav2Vec2BertModel loaded successfully")
+
+            # Load normalization stats
+            stat_path = os.path.join(self.model_dir, self.cfg.w2v_stat)
+            stat_mean_var = torch.load(stat_path, map_location=self.device)
+            self.semantic_mean = stat_mean_var["mean"].to(self.device)
+            self.semantic_std = torch.sqrt(stat_mean_var["var"]).to(self.device)
         elif self.model_stage == "s2mel":
             from indextts.s2mel.modules.commons import load_checkpoint2
 

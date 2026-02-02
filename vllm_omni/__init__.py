@@ -13,7 +13,10 @@ Architecture:
 """
 
 try:
-    from . import patch  # noqa: F401
+    from . import (
+        patch,  # noqa: F401
+        tokenizers,  # noqa: F401  # Register custom tokenizers
+    )
 except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
     if exc.name != "vllm":
         raise

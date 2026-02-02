@@ -6,6 +6,7 @@ class IndexTTS2Config(PretrainedConfig):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.num_attention_heads = 20
         # dataset:
         #     bpe_model: bpe.model
         #     sample_rate: 24000

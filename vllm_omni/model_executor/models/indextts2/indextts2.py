@@ -34,18 +34,14 @@ TokenizerRegistry.register(
 
 
 class IndexTTS2ProcessingInfo(BaseProcessingInfo):
-    """Processing info for IndexTTS2 model - text processing only."""
-
     def get_hf_config(self):
         return self.ctx.get_hf_config(IndexTTS2Config)
 
     def get_supported_mm_limits(self) -> Mapping[str, int | None]:
-        return {"audio": None}  # Use "audio" modality for text_token_ids field
+        return {"audio": None}
 
 
 class IndexTTS2Processor(BaseMultiModalProcessor[IndexTTS2ProcessingInfo]):
-    """Processor for IndexTTS2 - handles text tokenization only."""
-
     def _call_hf_processor(
         self,
         prompt: str,
@@ -53,7 +49,6 @@ class IndexTTS2Processor(BaseMultiModalProcessor[IndexTTS2ProcessingInfo]):
         mm_kwargs: Mapping[str, object],
         tok_kwargs: Mapping[str, object],
     ) -> BatchFeature:
-        # Use the custom tokenizer
         config = self.info.ctx.get_hf_config()
         model_dir = self.info.ctx.model_config.model
         bpe_path = os.path.join(model_dir, config.dataset["bpe_model"])
@@ -66,23 +61,15 @@ class IndexTTS2Processor(BaseMultiModalProcessor[IndexTTS2ProcessingInfo]):
 
         text_tokens = tokenizer.tokenize(prompt)
         text_token_ids = tokenizer.convert_tokens_to_ids(text_tokens)
-        input_ids = torch.tensor([text_token_ids], dtype=torch.long)  # 2D with batch dim
-
-        return BatchFeature(
-            {
-                "input_ids": input_ids,
-                "text_token_ids": input_ids,  # Pass through kwargs for forward()
-            }
-        )
+        input_ids = torch.tensor([text_token_ids], dtype=torch.long)
+        return BatchFeature({"input_ids": input_ids})
 
     def _get_mm_fields_config(
         self,
         hf_inputs: BatchFeature,
         hf_processor_mm_kwargs: Mapping[str, object],
     ) -> Mapping[str, MultiModalFieldConfig]:
-        return {
-            "text_token_ids": MultiModalFieldConfig.batched("audio"),
-        }
+        return {}
 
     def _hf_processor_applies_updates(
         self,
@@ -99,15 +86,13 @@ class IndexTTS2Processor(BaseMultiModalProcessor[IndexTTS2ProcessingInfo]):
         hf_processor_mm_kwargs: Mapping[str, object],
         out_mm_kwargs: MultiModalKwargsItems,
     ) -> Sequence[PromptUpdate]:
-        return []  # No prompt modifications
+        return []
 
     def _get_data_parser(self) -> MultiModalDataParser:
         return MultiModalDataParser(target_sr=22050)
 
 
 class IndexTTS2DummyInputsBuilder(BaseDummyInputsBuilder[IndexTTS2ProcessingInfo]):
-    """Dummy inputs builder for profiling IndexTTS2."""
-
     def get_dummy_text(self, mm_counts: Mapping[str, int]) -> str:
         return "Hello, this is a test."
 
@@ -117,7 +102,7 @@ class IndexTTS2DummyInputsBuilder(BaseDummyInputsBuilder[IndexTTS2ProcessingInfo
         mm_counts: Mapping[str, int],
         mm_options: Mapping[str, BaseDummyOptions] | None = None,
     ) -> dict:
-        return {}  # No multimodal data needed for profiling
+        return {}
 
     def get_dummy_processor_inputs(
         self,
@@ -138,11 +123,10 @@ class IndexTTS2DummyInputsBuilder(BaseDummyInputsBuilder[IndexTTS2ProcessingInfo
     dummy_inputs=IndexTTS2DummyInputsBuilder,
 )
 class IndexTTS2Model(nn.Module):
-    """IndexTTS2 TTS model with GPT and S2Mel stages."""
-
     supports_multimodal = True
+    supports_multimodal_raw_input_only = False
+    requires_raw_input_tokens = True
     have_multimodal_outputs = True
-    requires_raw_input_tokens = False
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
@@ -170,7 +154,6 @@ class IndexTTS2Model(nn.Module):
             from indextts.s2mel.modules.commons import MyModel
 
             def dict_to_namespace(d):
-                """Recursively convert dict to SimpleNamespace for attribute access."""
                 if isinstance(d, dict):
                     return SimpleNamespace(**{k: dict_to_namespace(v) for k, v in d.items()})
                 return d
@@ -263,10 +246,7 @@ class IndexTTS2Model(nn.Module):
             max_mel_tokens = runtime_info.get("max_mel_tokens", [1500])
             max_mel_tokens = max_mel_tokens[0] if isinstance(max_mel_tokens, list) else max_mel_tokens
 
-            text_token_ids = kwargs.get("text_token_ids")
-
-            if text_token_ids is None:
-                # Profile run - return dummy output
+            if input_ids is None or input_ids.numel() == 0:
                 model_dim = self.cfg.gpt["model_dim"]
                 return OmniOutput(
                     text_hidden_states=torch.zeros(1, 1, model_dim, device=target_device, dtype=target_dtype),
@@ -285,9 +265,12 @@ class IndexTTS2Model(nn.Module):
 
             self.talker.inference_model.eval().to(dtype=target_dtype)
 
+            if input_ids.dim() == 1:
+                input_ids = input_ids.unsqueeze(0)
+
             codes, speech_conditioning_latent = self.talker.inference_speech(
                 spk_cond_emb,
-                text_token_ids,
+                input_ids,
                 emo_cond_emb,
                 cond_lengths=torch.tensor([spk_cond_emb.shape[1]], device=spk_cond_emb.device),
                 emo_cond_lengths=torch.tensor([emo_cond_emb.shape[1]], device=spk_cond_emb.device),
@@ -320,8 +303,8 @@ class IndexTTS2Model(nn.Module):
             use_speed = torch.zeros(spk_cond_emb.size(0)).to(spk_cond_emb.device).long()
             latent = self.talker(
                 speech_conditioning_latent,
-                text_token_ids,
-                torch.tensor([text_token_ids.shape[-1]], device=target_device),
+                input_ids,
+                torch.tensor([input_ids.shape[-1]], device=target_device),
                 codes,
                 torch.tensor([codes.shape[-1]], device=target_device),
                 emo_cond_emb,
@@ -330,6 +313,9 @@ class IndexTTS2Model(nn.Module):
                 emo_vec=emovec,
                 use_speed=use_speed,
             )
+
+            # S_ref from quantize is [B, N, T], transpose to [N, B, T] for vq2emb
+            S_ref = S_ref.permute(1, 0, 2)
 
             multimodal_outputs = {
                 "latent": latent,
@@ -340,25 +326,29 @@ class IndexTTS2Model(nn.Module):
                 "ref_mel": ref_mel,
                 "style": style,
             }
-
             return OmniOutput(text_hidden_states=multimodal_outputs["latent"], multimodal_outputs=multimodal_outputs)
 
         elif self.model_stage == "s2mel":
             runtime_info = kwargs.get("runtime_additional_information", [])
-
             if not runtime_info:
                 return OmniOutput(
                     text_hidden_states=None,
-                    multimodal_outputs={"audio": torch.zeros(1, 22050), "sample_rate": 22050},
+                    multimodal_outputs={"audio": torch.zeros(1, 22050)},
                 )
 
             info = runtime_info[0]
-            latent = info["latent"]
-            codes = info["codes"]
-            code_lens = info["code_lens"]
-            S_ref = info["S_ref"]
-            ref_mel = info["ref_mel"]
-            style = info["style"]
+            latent = info.get("latent")
+            codes = info.get("codes")
+            code_lens = info.get("code_lens")
+            S_ref = info.get("S_ref")
+            ref_mel = info.get("ref_mel")
+            style = info.get("style")
+
+            if latent is None or codes is None:
+                return OmniOutput(
+                    text_hidden_states=None,
+                    multimodal_outputs={"audio": torch.zeros(1, 22050)},
+                )
 
             model_param = next(self.s2mel.parameters())
             target_device = model_param.device
@@ -407,10 +397,10 @@ class IndexTTS2Model(nn.Module):
 
             return OmniOutput(
                 text_hidden_states=None,
-                multimodal_outputs={"audio": wav.cpu(), "sample_rate": 22050},
+                multimodal_outputs={"audio": wav.cpu()},
             )
         else:
-            raise Exception("Oops")
+            raise ValueError(f"Unknown model_stage: {self.model_stage}")
 
     def embed_input_ids(
         self,
@@ -426,11 +416,9 @@ class IndexTTS2Model(nn.Module):
         raise NotImplementedError(f"embed_input_ids not implemented for stage {self.model_stage}")
 
     def embed_multimodal(self, **kwargs: Any) -> None:
-        """Audio conditioning is passed via runtime_additional_information."""
         return None
 
     def extract_speaker_embedding(self, audio: torch.Tensor, sr: int = 22050) -> torch.Tensor:
-        """Extract speaker embedding using Wav2Vec2BertModel."""
         if sr != 16000:
             audio_16k = torchaudio.transforms.Resample(sr, 16000)(audio)
         else:

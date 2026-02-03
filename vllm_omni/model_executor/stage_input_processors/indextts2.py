@@ -54,19 +54,39 @@ def gpt2s2mel(
         output = gpt_output.outputs[0]
         mm_output = output.multimodal_output
 
-        # Extract latent tensors from GPT output
+        # Extract all required tensors from GPT output
         latent = mm_output["latent"]
         speech_conditioning_latent = mm_output.get("speech_conditioning_latent", None)
+        codes = mm_output.get("codes", None)
+        code_lens = mm_output.get("code_lens", None)
+        S_ref = mm_output.get("S_ref", None)
+        ref_mel = mm_output.get("ref_mel", None)
+        style = mm_output.get("style", None)
 
-        # Ensure tensors are detached and on correct device
+        # Ensure tensors are detached
         if isinstance(latent, torch.Tensor):
             latent = latent.clone().detach()
         if isinstance(speech_conditioning_latent, torch.Tensor):
             speech_conditioning_latent = speech_conditioning_latent.clone().detach()
+        if isinstance(codes, torch.Tensor):
+            codes = codes.clone().detach()
+        if isinstance(code_lens, torch.Tensor):
+            code_lens = code_lens.clone().detach()
+        if isinstance(S_ref, torch.Tensor):
+            S_ref = S_ref.clone().detach()
+        if isinstance(ref_mel, torch.Tensor):
+            ref_mel = ref_mel.clone().detach()
+        if isinstance(style, torch.Tensor):
+            style = style.clone().detach()
 
         additional_information = {
             "latent": latent,
             "speech_conditioning_latent": speech_conditioning_latent,
+            "codes": codes,
+            "code_lens": code_lens,
+            "S_ref": S_ref,
+            "ref_mel": ref_mel,
+            "style": style,
             "latent_shape": list(latent.shape) if isinstance(latent, torch.Tensor) else None,
         }
 

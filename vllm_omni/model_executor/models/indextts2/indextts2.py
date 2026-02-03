@@ -1,49 +1,23 @@
 import os
 from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torchaudio
-
-# Suppress verbose logging from indextts/WeTextProcessing
-# The tn library creates loggers with INFO level and adds handlers each time,
-# so we use a filter that can't be overridden
-# class _BlockAllFilter(logging.Filter):
-#     def filter(self, record):
-#         return False
-# # Pre-configure wetext loggers BEFORE any tn imports
-# for _name in ["wetext-zh_normalizer", "wetext-en_normalizer"]:
-#     _logger = logging.getLogger(_name)
-#     _logger.addFilter(_BlockAllFilter())
-#     _logger.propagate = False  # Prevent propagation to root logger
-# _original_level = logging.root.level
-# logging.root.setLevel(logging.WARNING)
-from indextts.utils.front import TextNormalizer, TextTokenizer
-
-# logging.root.setLevel(_original_level)
-# # Keep these loggers quiet for subsequent calls
-# logging.getLogger("WETEXT").setLevel(logging.WARNING)
-# logging.getLogger("WeTextProcessing").setLevel(logging.WARNING)
-# logging.getLogger("indextts").setLevel(logging.WARNING)
 from transformers.feature_extraction_utils import BatchFeature
 from vllm.config import VllmConfig
 from vllm.config.multimodal import BaseDummyOptions
 from vllm.logger import init_logger
-from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.inputs import MultiModalDataDict, MultiModalFieldConfig, MultiModalKwargsItems
+from vllm.multimodal.inputs import MultiModalFieldConfig, MultiModalKwargsItems
 from vllm.multimodal.parse import MultiModalDataItems, MultiModalDataParser
 from vllm.multimodal.processing import (
     BaseMultiModalProcessor,
     BaseProcessingInfo,
-    PromptIndexTargets,
-    PromptInsertion,
     PromptUpdate,
 )
 from vllm.multimodal.profiling import BaseDummyInputsBuilder, ProcessorInputs
-
-# from vllm.model_executor.models.qwen2 import
 from vllm.sequence import IntermediateTensors
 from vllm.tokenizers import TokenizerRegistry
 
@@ -59,15 +33,19 @@ TokenizerRegistry.register(
 )
 
 
-class IndexTTS2MultiModalProcessingInfo(BaseProcessingInfo):
+class IndexTTS2ProcessingInfo(BaseProcessingInfo):
+    """Processing info for IndexTTS2 model - text processing only."""
+
     def get_hf_config(self):
         return self.ctx.get_hf_config(IndexTTS2Config)
 
     def get_supported_mm_limits(self) -> Mapping[str, int | None]:
-        return {"audio": None}
+        return {"audio": None}  # Use "audio" modality for text_token_ids field
 
 
-class IndexTTS2MultiModalProcessor(BaseMultiModalProcessor[IndexTTS2MultiModalProcessingInfo]):
+class IndexTTS2Processor(BaseMultiModalProcessor[IndexTTS2ProcessingInfo]):
+    """Processor for IndexTTS2 - handles text tokenization only."""
+
     def _call_hf_processor(
         self,
         prompt: str,
@@ -75,64 +53,35 @@ class IndexTTS2MultiModalProcessor(BaseMultiModalProcessor[IndexTTS2MultiModalPr
         mm_kwargs: Mapping[str, object],
         tok_kwargs: Mapping[str, object],
     ) -> BatchFeature:
-        logger.info(f"prompt: {prompt} mm_data: {mm_data} mm_kwargs: {mm_kwargs} tok_kwargs: {tok_kwargs}")
-        self.config = self.info.ctx.get_hf_config()
-        self.model_dir = self.info.ctx.model_config.model
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(self.model_dir)
+        # Use the custom tokenizer
+        config = self.info.ctx.get_hf_config()
+        model_dir = self.info.ctx.model_config.model
+        bpe_path = os.path.join(model_dir, config.dataset["bpe_model"])
 
-        self.bpe_path = os.path.join(self.model_dir, self.config.dataset["bpe_model"])
-        self.normalizer = TextNormalizer(enable_glossary=True)
-        self.normalizer.load()
-        logger.info(">> TextNormalizer loaded")
-        self.tokenizer = TextTokenizer(self.bpe_path, self.normalizer)
-        logger.info(f">> bpe model loaded from: {self.bpe_path}")
+        from indextts.utils.front import TextNormalizer, TextTokenizer
 
-        text_tokens_list = self.tokenizer.tokenize(prompt)
-        text_token_ids = self.tokenizer.convert_tokens_to_ids(text_tokens_list)
-        input_ids = torch.tensor([text_token_ids], dtype=torch.long, device=device)
+        normalizer = TextNormalizer(enable_glossary=True)
+        normalizer.load()
+        tokenizer = TextTokenizer(bpe_path, normalizer=normalizer)
 
-        logger.info(f"input_ids {input_ids}")
+        text_tokens = tokenizer.tokenize(prompt)
+        text_token_ids = tokenizer.convert_tokens_to_ids(text_tokens)
+        input_ids = torch.tensor([text_token_ids], dtype=torch.long)  # 2D with batch dim
 
-        if len(mm_data) == 0:
-            return BatchFeature({"input_ids": input_ids})
-
-        logger.info(f"{mm_kwargs}")
-        # Get emotion audio and weight from mm_kwargs
-        emo_audio, _ = mm_kwargs.get("emo_audio")
-        emo_weight = mm_kwargs.get("emo_weight")
-
-        # Get speaker audio from mm_data
-        audio = mm_data.get("audios")[0]
-        sr = 22050
-
-        # Convert to tensors with batch dimension (raw audio - model will extract embeddings)
-        audio = torch.Tensor(audio).unsqueeze(0)  # (1, num_samples)
-        emo_audio = torch.Tensor(emo_audio).unsqueeze(0)  # (1, num_samples)
-
-        # Return raw audio for model to process (following Qwen3TTS pattern)
         return BatchFeature(
             {
-                "input_ids": input_ids.cpu(),
-                "text_token_ids": input_ids.cpu(),
-                "audio": audio.cpu(),
-                "emo_audio": emo_audio.cpu(),
-                "emo_weight": torch.tensor([[emo_weight]]),  # (1, 1)
-                "sample_rate": torch.tensor([[sr]]),  # (1, 1)
+                "input_ids": input_ids,
+                "text_token_ids": input_ids,  # Pass through kwargs for forward()
             }
         )
 
     def _get_mm_fields_config(
         self,
-        hf_inputs: "BatchFeature",
+        hf_inputs: BatchFeature,
         hf_processor_mm_kwargs: Mapping[str, object],
     ) -> Mapping[str, MultiModalFieldConfig]:
         return {
-            "audio": MultiModalFieldConfig.batched("audio", keep_on_cpu=True),
-            "emo_audio": MultiModalFieldConfig.batched("audio", keep_on_cpu=True),
-            "emo_weight": MultiModalFieldConfig.batched("audio"),
             "text_token_ids": MultiModalFieldConfig.batched("audio"),
-            "sample_rate": MultiModalFieldConfig.batched("audio", keep_on_cpu=True),
         }
 
     def _hf_processor_applies_updates(
@@ -150,118 +99,71 @@ class IndexTTS2MultiModalProcessor(BaseMultiModalProcessor[IndexTTS2MultiModalPr
         hf_processor_mm_kwargs: Mapping[str, object],
         out_mm_kwargs: MultiModalKwargsItems,
     ) -> Sequence[PromptUpdate]:
-        def insertion_end(item_idx):
-            return [1]
-
-        return [
-            PromptInsertion(
-                modality="audio",
-                target=PromptIndexTargets.start(),
-                insertion=insertion_end,
-            ),
-        ]
+        return []  # No prompt modifications
 
     def _get_data_parser(self) -> MultiModalDataParser:
-        """For audio you need to define target_sr;
-        so need to create this data parser to avoid those errors
-        """
-        return MultiModalDataParser(target_sr=self.info.ctx.get_hf_config().s2mel["preprocess_params"]["sr"])
+        return MultiModalDataParser(target_sr=22050)
 
 
-class IndexTTS2DummyInputsBuilder(BaseDummyInputsBuilder[IndexTTS2MultiModalProcessingInfo]):
+class IndexTTS2DummyInputsBuilder(BaseDummyInputsBuilder[IndexTTS2ProcessingInfo]):
+    """Dummy inputs builder for profiling IndexTTS2."""
+
     def get_dummy_text(self, mm_counts: Mapping[str, int]) -> str:
-        return "Hello, this is a test of the IndexTTS2 system capability."
+        return "Hello, this is a test."
 
     def get_dummy_mm_data(
-        self, seq_len: int, mm_counts: Mapping[str, int], mm_options: Mapping[str, BaseDummyOptions] | None = None
-    ) -> MultiModalDataDict:
-        num_audios = mm_counts.get("audio")
-        max_prompt_seconds = 15
-        prompt_sample_rate = 24000
-        target_audio_length = max_prompt_seconds * prompt_sample_rate
-
-        audio_overrides = mm_options.get("audio") if mm_options else None
-        mm_data = {
-            "audio": (
-                self._get_dummy_audios(
-                    length=target_audio_length,
-                    num_audios=num_audios,
-                    overrides=audio_overrides,
-                )[0],
-                prompt_sample_rate,
-            ),
-        }
-        # return mm_data
-        # TODO: Return this instead of mm_data
-        print(mm_data)
-        import librosa
-
-        audio_signal, sr = librosa.load("/home/divyansh/code/open_source/vllm-omni/prompt.wav")
-        audio_data = (audio_signal.astype(np.float32), sr)
-        mm_data = {"audio": audio_data}
-        return mm_data
+        self,
+        seq_len: int,
+        mm_counts: Mapping[str, int],
+        mm_options: Mapping[str, BaseDummyOptions] | None = None,
+    ) -> dict:
+        return {}  # No multimodal data needed for profiling
 
     def get_dummy_processor_inputs(
-        self, seq_len: int, mm_counts: Mapping[str, int], mm_options: Mapping[str, BaseDummyOptions] | None = None
+        self,
+        seq_len: int,
+        mm_counts: Mapping[str, int],
+        mm_options: Mapping[str, BaseDummyOptions] | None = None,
     ) -> ProcessorInputs:
-        inputs = super().get_dummy_processor_inputs(seq_len, mm_counts, mm_options)
-        # num_audios = 1
-        # max_prompt_seconds = 15
-        # prompt_sample_rate = 16000
-        # target_audio_length = max_prompt_seconds * prompt_sample_rate
-        import librosa
-
-        audio_signal, sr = librosa.load("/home/divyansh/code/open_source/vllm-omni/prompt.wav", sr=16000)
-        audio_data = (audio_signal.astype(np.float32), sr)
-
-        inputs.hf_processor_mm_kwargs = {
-            "emo_mode": 1,
-            "emo_weight": 1.0,
-            # "emo_audio": (
-            #     self._get_dummy_audios(
-            #         length=target_audio_length,
-            #         num_audios=num_audios,
-            #     )[0],
-            #     prompt_sample_rate,
-            # ),
-            "emo_audio": audio_data,
-            "emo_text": "Abra Ka Dabra!",
-        }
-        return inputs
+        return ProcessorInputs(
+            prompt=self.get_dummy_text(mm_counts),
+            mm_data={},
+            hf_processor_mm_kwargs={},
+        )
 
 
 @MULTIMODAL_REGISTRY.register_processor(
-    IndexTTS2MultiModalProcessor,
-    info=IndexTTS2MultiModalProcessingInfo,
+    IndexTTS2Processor,
+    info=IndexTTS2ProcessingInfo,
     dummy_inputs=IndexTTS2DummyInputsBuilder,
 )
-class IndexTTS2Model(nn.Module, SupportsMultiModal):
+class IndexTTS2Model(nn.Module):
+    """IndexTTS2 TTS model with GPT and S2Mel stages."""
+
     supports_multimodal = True
-    # supports_multimodal_raw_input_only = False
+    have_multimodal_outputs = True
+    requires_raw_input_tokens = False
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
         self.cfg = vllm_config.model_config.hf_config
         self.model_dir = vllm_config.model_config.model
         self.model_stage = vllm_config.model_config.model_stage
-        # self.cfg_dtype = vllm_config.model_config.dtype
-        # self.use_accel = getattr(self.cfg, "use_accel", False)
-        # TODO: Fix it
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         if self.model_stage == "gpt":
             from indextts.gpt.model_v2 import UnifiedVoice
 
             self.talker = UnifiedVoice(**self.cfg.gpt)
-
-            logger.info("Unified Voice")
             self.stop_mel_token = self.cfg.gpt["stop_mel_token"]
 
-            # Auxiliary models for speaker embedding extraction (initialized in load_weights)
             self.semantic_model = None
             self.feature_extractor = None
             self.semantic_mean = None
             self.semantic_std = None
+            self.semantic_codec = None
+            self.campplus_model = None
+            self.mel_fn = None
         elif self.model_stage == "s2mel":
             from types import SimpleNamespace
 
@@ -274,99 +176,121 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
                 return d
 
             self.s2mel = MyModel(dict_to_namespace(self.cfg.s2mel), use_gpt_latent=True)
-
-            pass
+            self.semantic_codec = None
+            self.bigvgan = None
 
     def forward(
         self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
+        input_ids: torch.Tensor | None = None,
+        positions: torch.Tensor | None = None,
         intermediate_tensors: IntermediateTensors | None = None,
         inputs_embeds: torch.Tensor | None = None,
-        additional_information: dict[str, object] | None = None,
-        **kwargs: object,
+        **kwargs: Any,
     ) -> OmniOutput:
         if self.model_stage == "gpt":
-            # Get raw audio from processor (following Qwen3TTS pattern)
-            audio = kwargs.get("audio")
-            emo_audio = kwargs.get("emo_audio")
-            sr = kwargs.get("sample_rate")[0, 0].item()
-            emo_alpha = kwargs.get("emo_weight")
+            runtime_info = kwargs.get("runtime_additional_information", [{}])
+            if isinstance(runtime_info, list) and len(runtime_info) > 0:
+                runtime_info = runtime_info[0]
 
-            logger.info(
-                f"input_ids {input_ids} positions {positions}"
-                f"intermediate_tensors {intermediate_tensors}"
-                f"inputs_embeds {inputs_embeds} "
-                f"additional_information {additional_information}"
-                f"kwargs audio shape: {audio.shape if audio is not None else None}"
-                f"kwargs emo_audio shape: {emo_audio.shape if emo_audio is not None else None}"
-            )
+            audio_path = runtime_info.get("audio_path", [None])
+            if isinstance(audio_path, list):
+                audio_path = audio_path[0] if audio_path else None
 
-            # Extract embeddings from raw audio using pre-loaded semantic_model
-            spk_cond_emb = self.extract_speaker_embedding(audio, int(sr))
-            emo_cond_emb = self.extract_speaker_embedding(emo_audio, int(sr))
+            emo_audio_path = runtime_info.get("emo_audio_path", [None])
+            if isinstance(emo_audio_path, list):
+                emo_audio_path = emo_audio_path[0] if emo_audio_path else None
 
-            assert spk_cond_emb.dim() == 3, spk_cond_emb.shape
-            assert emo_cond_emb.dim() == 3, emo_cond_emb.shape
+            emo_weight = runtime_info.get("emo_weight", [0.5])
+            if isinstance(emo_weight, list):
+                emo_weight = emo_weight[0] if emo_weight else 0.5
 
             model_param = next(self.talker.parameters())
             target_device = model_param.device
             target_dtype = model_param.dtype
 
+            if audio_path and os.path.exists(audio_path):
+                audio, sr = torchaudio.load(audio_path)
+                audio_22k = torchaudio.transforms.Resample(sr, 22050)(audio).to(target_device)
+                audio_16k = torchaudio.transforms.Resample(sr, 16000)(audio).to(target_device)
+
+                spk_cond_emb = self.extract_speaker_embedding(audio, int(sr))
+                _, S_ref = self.semantic_codec.quantize(spk_cond_emb)
+                ref_mel = self.mel_fn(audio_22k.float())
+
+                feat = torchaudio.compliance.kaldi.fbank(audio_16k, num_mel_bins=80, dither=0, sample_frequency=16000)
+                feat = feat - feat.mean(dim=0, keepdim=True)
+                style = self.campplus_model(feat.unsqueeze(0))
+            else:
+                # Dummy for profile run
+                spk_cond_emb = torch.zeros(
+                    1, 100, self.cfg.semantic_codec["hidden_size"], device=target_device, dtype=target_dtype
+                )
+                S_ref = torch.zeros(1, 8, 100, device=target_device, dtype=torch.long)
+                ref_mel = torch.zeros(1, 80, 100, device=target_device, dtype=target_dtype)
+                style = torch.zeros(1, 192, device=target_device, dtype=target_dtype)
+
+            if emo_audio_path and os.path.exists(emo_audio_path):
+                emo_audio, emo_sr = torchaudio.load(emo_audio_path)
+                emo_cond_emb = self.extract_speaker_embedding(emo_audio, int(emo_sr))
+            else:
+                emo_cond_emb = spk_cond_emb.clone()
+
+            emo_alpha = torch.tensor([[emo_weight]], device=target_device, dtype=target_dtype)
             spk_cond_emb = spk_cond_emb.to(device=target_device, dtype=target_dtype)
             emo_cond_emb = emo_cond_emb.to(device=target_device, dtype=target_dtype)
-            emo_alpha = emo_alpha.to(device=target_device, dtype=target_dtype)
 
             B = spk_cond_emb.shape[0]
-            cond_lengths = torch.full((B,), spk_cond_emb.shape[-1], device=spk_cond_emb.device)
-            emo_cond_lengths = torch.full((B,), emo_cond_emb.shape[-1], device=emo_cond_emb.device)
+            cond_lengths = torch.full((B,), spk_cond_emb.shape[1], device=spk_cond_emb.device)
+            emo_cond_lengths = torch.full((B,), emo_cond_emb.shape[1], device=emo_cond_emb.device)
 
             emovec = self.talker.merge_emovec(
                 spk_cond_emb, emo_cond_emb, cond_lengths, emo_cond_lengths, alpha=emo_alpha
             )
 
-            logger.info(f"emovec {emovec} {spk_cond_emb} {emo_cond_emb} ")
-
-            ##TODO: Fix this value fetches
-            top_p = kwargs.pop("top_p", 0.8)
-            top_k = kwargs.pop("top_k", 30)
-            temperature = kwargs.pop("temperature", 0.8)
+            top_p = runtime_info.get("top_p", [0.8])
+            top_p = top_p[0] if isinstance(top_p, list) else top_p
+            top_k = runtime_info.get("top_k", [30])
+            top_k = top_k[0] if isinstance(top_k, list) else top_k
+            temperature = runtime_info.get("temperature", [0.8])
+            temperature = temperature[0] if isinstance(temperature, list) else temperature
             autoregressive_batch_size = 1
-            length_penalty = kwargs.pop("length_penalty", 0.0)
-            num_beams = kwargs.pop("num_beams", 3)
-            repetition_penalty = kwargs.pop("repetition_penalty", 10.0)
-            max_mel_tokens = kwargs.pop("max_mel_tokens", 1500)
+            length_penalty = runtime_info.get("length_penalty", [0.0])
+            length_penalty = length_penalty[0] if isinstance(length_penalty, list) else length_penalty
+            num_beams = runtime_info.get("num_beams", [3])
+            num_beams = num_beams[0] if isinstance(num_beams, list) else num_beams
+            repetition_penalty = runtime_info.get("repetition_penalty", [10.0])
+            repetition_penalty = repetition_penalty[0] if isinstance(repetition_penalty, list) else repetition_penalty
+            max_mel_tokens = runtime_info.get("max_mel_tokens", [1500])
+            max_mel_tokens = max_mel_tokens[0] if isinstance(max_mel_tokens, list) else max_mel_tokens
 
             text_token_ids = kwargs.get("text_token_ids")
-            # text_token_ids = text_token_ids.squeeze(0)
+
+            if text_token_ids is None:
+                # Profile run - return dummy output
+                model_dim = self.cfg.gpt["model_dim"]
+                return OmniOutput(
+                    text_hidden_states=torch.zeros(1, 1, model_dim, device=target_device, dtype=target_dtype),
+                    multimodal_outputs={
+                        "latent": torch.zeros(1, 1, model_dim, device=target_device, dtype=target_dtype),
+                        "speech_conditioning_latent": torch.zeros(
+                            1, 1, model_dim, device=target_device, dtype=target_dtype
+                        ),
+                        "codes": torch.zeros(1, 1, device=target_device, dtype=torch.long),
+                        "code_lens": torch.tensor([1], device=target_device),
+                        "S_ref": torch.zeros(8, 1, 1, device=target_device, dtype=torch.long),  # [N, B, T]
+                        "ref_mel": torch.zeros(1, 80, 1, device=target_device, dtype=target_dtype),
+                        "style": torch.zeros(1, 192, device=target_device, dtype=target_dtype),
+                    },
+                )
+
             self.talker.inference_model.eval().to(dtype=target_dtype)
 
-            logger.info(
-                f"spk_cond_emb {spk_cond_emb.shape}\n"
-                f"text_token_ids {text_token_ids.shape}\n"
-                f"emo_cond_emb {emo_cond_emb.shape}\n"
-                f"cond_lengths {cond_lengths.shape}\n"
-                f"emo_cond_lengths {emo_cond_lengths.shape}\n"
-                f"emo_vec {emovec.shape}\n"
-                f"do_sample: True"
-                f"top_p {top_p}"
-                f"top_k {top_k}"
-                f"temperature {temperature}"
-                f"num_return_sequences {autoregressive_batch_size}"
-                f"length_penalty {length_penalty}"
-                f"num_beams {num_beams}"
-                f"repetition_penalty {repetition_penalty}"
-                f"max_generate_length {max_mel_tokens}"
-            )
-
-            # TODO: Fix caching in inference_model
             codes, speech_conditioning_latent = self.talker.inference_speech(
                 spk_cond_emb,
-                ### TODO: Fix it
                 text_token_ids,
                 emo_cond_emb,
-                cond_lengths=torch.tensor([spk_cond_emb.shape[-1]], device=spk_cond_emb.device),
-                emo_cond_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=spk_cond_emb.device),
+                cond_lengths=torch.tensor([spk_cond_emb.shape[1]], device=spk_cond_emb.device),
+                emo_cond_lengths=torch.tensor([emo_cond_emb.shape[1]], device=spk_cond_emb.device),
                 emo_vec=emovec,
                 do_sample=True,
                 top_p=top_p,
@@ -379,7 +303,6 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
                 max_generate_length=max_mel_tokens,
             )
 
-            # code_lens = torch.tensor([codes.shape[-1]], device=codes.device, dtype=codes.dtype)
             code_lens = []
             max_code_len = 0
             for code in codes:
@@ -395,16 +318,15 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
             code_lens = code_lens.to(self.device)
 
             use_speed = torch.zeros(spk_cond_emb.size(0)).to(spk_cond_emb.device).long()
-            # with torch.amp.autocast(text_tokens.device.type, enabled=self.dtype is not None, dtype=self.dtype):
             latent = self.talker(
                 speech_conditioning_latent,
                 text_token_ids,
-                torch.tensor([text_token_ids.shape[-1]], device=text_token_ids.device),
+                torch.tensor([text_token_ids.shape[-1]], device=target_device),
                 codes,
-                torch.tensor([codes.shape[-1]], device=text_token_ids.device),
+                torch.tensor([codes.shape[-1]], device=target_device),
                 emo_cond_emb,
-                cond_mel_lengths=torch.tensor([spk_cond_emb.shape[-1]], device=text_token_ids.device),
-                emo_cond_mel_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=text_token_ids.device),
+                cond_mel_lengths=torch.tensor([spk_cond_emb.shape[1]], device=target_device),
+                emo_cond_mel_lengths=torch.tensor([emo_cond_emb.shape[1]], device=target_device),
                 emo_vec=emovec,
                 use_speed=use_speed,
             )
@@ -412,127 +334,108 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
             multimodal_outputs = {
                 "latent": latent,
                 "speech_conditioning_latent": speech_conditioning_latent,
+                "codes": codes,
+                "code_lens": code_lens,
+                "S_ref": S_ref,
+                "ref_mel": ref_mel,
+                "style": style,
             }
 
-            print(f"multimodal_outputs {multimodal_outputs}")
-
             return OmniOutput(text_hidden_states=multimodal_outputs["latent"], multimodal_outputs=multimodal_outputs)
+
         elif self.model_stage == "s2mel":
-            # Get latent from runtime_additional_information (passed from gpt2s2mel stage input processor)
             runtime_info = kwargs.get("runtime_additional_information", [])
-            logger.info(f"runtime_info {runtime_info}")
+
             if not runtime_info:
-                length = 30 * 24000
-                audio = np.zeros((length,))
-                return OmniOutput(text_hidden_states=None, multimodal_outputs={"audio": audio})
+                return OmniOutput(
+                    text_hidden_states=None,
+                    multimodal_outputs={"audio": torch.zeros(1, 22050), "sample_rate": 22050},
+                )
 
             info = runtime_info[0]
-            latent = info.get("latent")
-            speech_conditioning_latent = info.get("speech_conditioning_latent")
+            latent = info["latent"]
+            codes = info["codes"]
+            code_lens = info["code_lens"]
+            S_ref = info["S_ref"]
+            ref_mel = info["ref_mel"]
+            style = info["style"]
 
-            logger.info(f"s2mel forward - latent shape: {latent.shape if latent is not None else None}")
-
-            # Move to correct device/dtype
             model_param = next(self.s2mel.parameters())
             target_device = model_param.device
             target_dtype = model_param.dtype
 
-            if isinstance(latent, torch.Tensor):
-                latent = latent.to(device=target_device, dtype=target_dtype)
-            if isinstance(speech_conditioning_latent, torch.Tensor):
-                speech_conditioning_latent = speech_conditioning_latent.to(device=target_device, dtype=target_dtype)
+            latent = latent.to(device=target_device, dtype=target_dtype)
+            codes = codes.to(device=target_device).long()
+            code_lens = code_lens.to(device=target_device).long()
+            S_ref = S_ref.to(device=target_device).long()
+            ref_mel = ref_mel.to(device=target_device, dtype=target_dtype)
+            style = style.to(device=target_device, dtype=target_dtype)
 
-            # Process through s2mel gpt_layer
+            ref_target_lengths = torch.LongTensor([ref_mel.size(-1)]).to(target_device)
+            S_ref_emb = self.semantic_codec.quantizer.vq2emb(S_ref.long(), n_quantizers=3)
+            S_ref_emb = S_ref_emb.transpose(1, 2)
+            prompt_condition = self.s2mel.models["length_regulator"](
+                S_ref_emb, ylens=ref_target_lengths, n_quantizers=3, f0=None
+            )[0]
+
             latent = self.s2mel.models["gpt_layer"](latent)
 
-            # S_infer = self.semantic_codec.quantizer.vq2emb(codes.unsqueeze(1))
-            # S_infer = S_infer.transpose(1, 2)
-            # S_infer = S_infer + latent
-            # target_lengths = (code_lens * 1.72).long()
+            S_infer = self.semantic_codec.quantizer.vq2emb(codes.long().unsqueeze(1))
+            S_infer = S_infer.transpose(1, 2)
+            S_infer = S_infer + latent
 
-            # cond = self.s2mel.models["length_regulator"](S_infer, ylens=target_lengths, n_quantizers=3, f0=None)[0]
-            # cat_condition = torch.cat([prompt_condition, cond], dim=1)
-            # vc_target = self.s2mel.models["cfm"].inference(
-            #     cat_condition,
-            #     torch.LongTensor([cat_condition.size(1)]).to(cond.device),
-            #     ref_mel,
-            #     style,
-            #     None,
-            #     diffusion_steps,
-            #     inference_cfg_rate=inference_cfg_rate,
-            # )
-            # vc_target = vc_target[:, :, ref_mel.size(-1) :]
-            # s2mel_time += time.perf_counter() - m_start_time
+            target_lengths = (code_lens * 1.72).long()
+            cond = self.s2mel.models["length_regulator"](S_infer, ylens=target_lengths, n_quantizers=3, f0=None)[0]
 
-            # m_start_time = time.perf_counter()
-            # wav = self.bigvgan(vc_target.float()).squeeze().unsqueeze(0)
-            # print(wav.shape)
-            # bigvgan_time += time.perf_counter() - m_start_time
-            # wav = wav.squeeze(1)
+            cat_condition = torch.cat([prompt_condition, cond], dim=1)
 
-            # # TODO: Add full s2mel inference (DiT, CFM, etc.)
-            # multimodal_outputs = {
-            #     "latent": latent,
-            #     "speech_conditioning_latent": speech_conditioning_latent,
-            # }
+            diffusion_steps = 25
+            inference_cfg_rate = 0.7
+            vc_target = self.s2mel.models["cfm"].inference(
+                cat_condition,
+                torch.LongTensor([cat_condition.size(1)]).to(target_device),
+                ref_mel,
+                style,
+                None,
+                diffusion_steps,
+                inference_cfg_rate=inference_cfg_rate,
+            )
+            vc_target = vc_target[:, :, ref_mel.size(-1) :]
 
-            # return OmniOutput(text_hidden_states=latent, multimodal_outputs=multimodal_outputs)
+            wav = self.bigvgan(vc_target.float()).squeeze(1)
+            wav = torch.clamp(32767 * wav, -32767.0, 32767.0)
+
+            return OmniOutput(
+                text_hidden_states=None,
+                multimodal_outputs={"audio": wav.cpu(), "sample_rate": 22050},
+            )
         else:
             raise Exception("Oops")
 
-    def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
-        """Embed input token IDs into continuous representations.
-
-        Required by vLLM's VllmModel interface.
-        """
+    def embed_input_ids(
+        self,
+        input_ids: torch.Tensor,
+        multimodal_embeddings: Any = None,
+        is_multimodal: torch.Tensor | None = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         if self.model_stage == "gpt":
             return self.talker.text_embedding(input_ids)
+        elif self.model_stage == "s2mel":
+            return torch.zeros_like(input_ids).reshape(-1, 1).repeat(1, self.cfg.hidden_size)
         raise NotImplementedError(f"embed_input_ids not implemented for stage {self.model_stage}")
 
-    def embed_multimodal(self, **kwargs) -> list[torch.Tensor]:
-        """Process multimodal inputs and return embeddings for encoder cache.
-
-        For IndexTTS2, this extracts speaker embeddings from raw audio.
-        """
-        if self.model_stage != "gpt":
-            return []
-
-        audio = kwargs.get("audio")
-        emo_audio = kwargs.get("emo_audio")
-        sample_rate = kwargs.get("sample_rate")
-
-        if audio is None:
-            return []
-
-        sr = sample_rate[0, 0].item() if sample_rate is not None else 22050
-
-        # Extract embeddings from raw audio
-        spk_cond_emb = self.extract_speaker_embedding(audio, int(sr))
-        emo_cond_emb = self.extract_speaker_embedding(emo_audio, int(sr)) if emo_audio is not None else spk_cond_emb
-
-        # Return as list (one item per batch element)
-        # Concatenate speaker and emotion embeddings for caching
-        combined = torch.cat([spk_cond_emb, emo_cond_emb], dim=1)
-        return [combined]
+    def embed_multimodal(self, **kwargs: Any) -> None:
+        """Audio conditioning is passed via runtime_additional_information."""
+        return None
 
     def extract_speaker_embedding(self, audio: torch.Tensor, sr: int = 22050) -> torch.Tensor:
-        """Extract speaker embedding using semantic model.
-
-        Args:
-            audio: Raw audio tensor (1D or 2D with batch dim)
-            sr: Sample rate of the input audio (default 22050)
-
-        Returns:
-            Speaker embedding tensor of shape (B, T, C)
-        """
-        # Resample to 16kHz if needed
+        """Extract speaker embedding using Wav2Vec2BertModel."""
         if sr != 16000:
             audio_16k = torchaudio.transforms.Resample(sr, 16000)(audio)
         else:
             audio_16k = audio
 
-        # Extract features using feature extractor
-        # Convert to numpy for the feature extractor
         if audio_16k.dim() == 1:
             audio_np = audio_16k.cpu().numpy()
         else:
@@ -543,62 +446,73 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
         input_features = inputs["input_features"].to(device=self.device, dtype=model_dtype)
         attention_mask = inputs["attention_mask"].to(self.device)
 
-        # Get embeddings from semantic model
         with torch.inference_mode():
             outputs = self.semantic_model(
                 input_features=input_features,
                 attention_mask=attention_mask,
                 output_hidden_states=True,
             )
-            feat = outputs.hidden_states[17]  # (B, T, C)
+            feat = outputs.hidden_states[17]
             feat = (feat - self.semantic_mean) / self.semantic_std
 
         return feat
 
     def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        """Required by vLLM to recognize this as a generative model."""
         return None
-        num_tokens = hidden_states.shape[0]
-        vocab_size = self.cfg.gpt["number_mel_codes"]  # 8194
-        stop_token_id = self.stop_mel_token  # 8193
-
-        logits = torch.full(
-            (num_tokens, vocab_size),
-            fill_value=-1e9,
-            dtype=hidden_states.dtype,
-            device=hidden_states.device,
-        )
-        logits[:, stop_token_id] = 0.0
-        return logits
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         if self.model_stage == "gpt":
             from indextts.utils.checkpoint import load_checkpoint
 
             self.talker_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
-            logger.info("loading gpt2")
             load_checkpoint(self.talker, self.talker_path)
             self.talker.to(self.device)
-            # TODO : Fix fp16 / fp32
             self.talker.eval().half()
-            # TODO : Fix fp16 / fp32
-            logger.info("post init gpt2 config")
             self.talker.post_init_gpt2_config(use_deepspeed=False, kv_cache=False, half=True)
 
-            # Load semantic model for speaker embedding extraction
             from transformers import SeamlessM4TFeatureExtractor, Wav2Vec2BertModel
 
-            logger.info("Loading Wav2Vec2BertModel for speaker embedding extraction...")
             self.feature_extractor = SeamlessM4TFeatureExtractor.from_pretrained("facebook/w2v-bert-2.0")
             self.semantic_model = Wav2Vec2BertModel.from_pretrained("facebook/w2v-bert-2.0", torch_dtype=torch.float16)
             self.semantic_model.to(self.device).eval()
-            logger.info("Wav2Vec2BertModel loaded successfully")
 
-            # Load normalization stats
             stat_path = os.path.join(self.model_dir, self.cfg.w2v_stat)
             stat_mean_var = torch.load(stat_path, map_location=self.device)
             self.semantic_mean = stat_mean_var["mean"].to(self.device)
             self.semantic_std = torch.sqrt(stat_mean_var["var"]).to(self.device)
+
+            import safetensors.torch
+            from huggingface_hub import hf_hub_download
+            from indextts.utils.maskgct_utils import build_semantic_codec
+
+            semantic_codec = build_semantic_codec(self.cfg.semantic_codec)
+            semantic_code_ckpt = hf_hub_download("amphion/MaskGCT", filename="semantic_codec/model.safetensors")
+            safetensors.torch.load_model(semantic_codec, semantic_code_ckpt)
+            self.semantic_codec = semantic_codec.to(self.device).eval()
+
+            from indextts.s2mel.modules.campplus.DTDNN import CAMPPlus
+
+            campplus_ckpt_path = hf_hub_download("funasr/campplus", filename="campplus_cn_common.bin")
+            self.campplus_model = CAMPPlus(feat_dim=80, embedding_size=192)
+            self.campplus_model.load_state_dict(torch.load(campplus_ckpt_path, map_location="cpu"))
+            self.campplus_model = self.campplus_model.to(self.device).eval()
+
+            from indextts.s2mel.modules.audio import mel_spectrogram
+
+            mel_fn_args = {
+                "n_fft": self.cfg.s2mel["preprocess_params"]["spect_params"]["n_fft"],
+                "win_size": self.cfg.s2mel["preprocess_params"]["spect_params"]["win_length"],
+                "hop_size": self.cfg.s2mel["preprocess_params"]["spect_params"]["hop_length"],
+                "num_mels": self.cfg.s2mel["preprocess_params"]["spect_params"]["n_mels"],
+                "sampling_rate": self.cfg.s2mel["preprocess_params"]["sr"],
+                "fmin": self.cfg.s2mel["preprocess_params"]["spect_params"].get("fmin", 0),
+                "fmax": None
+                if self.cfg.s2mel["preprocess_params"]["spect_params"].get("fmax", "None") == "None"
+                else 8000,
+                "center": False,
+            }
+            self.mel_fn = lambda x: mel_spectrogram(x, **mel_fn_args)
+
         elif self.model_stage == "s2mel":
             from indextts.s2mel.modules.commons import load_checkpoint2
 
@@ -615,5 +529,22 @@ class IndexTTS2Model(nn.Module, SupportsMultiModal):
             self.s2mel.models["cfm"].estimator.setup_caches(max_batch_size=1, max_seq_length=8192)
             self.s2mel.eval()
 
+            import safetensors.torch
+            from huggingface_hub import hf_hub_download
+            from indextts.utils.maskgct_utils import build_semantic_codec
+
+            semantic_codec = build_semantic_codec(self.cfg.semantic_codec)
+            semantic_code_ckpt = hf_hub_download("amphion/MaskGCT", filename="semantic_codec/model.safetensors")
+            safetensors.torch.load_model(semantic_codec, semantic_code_ckpt)
+            self.semantic_codec = semantic_codec.to(self.device).eval()
+
+            from indextts.s2mel.modules.bigvgan import bigvgan as bigvgan_module
+
+            bigvgan_name = self.cfg.vocoder["name"]
+            self.bigvgan = bigvgan_module.BigVGAN.from_pretrained(bigvgan_name, use_cuda_kernel=False)
+            self.bigvgan = self.bigvgan.to(self.device)
+            self.bigvgan.remove_weight_norm()
+            self.bigvgan.eval()
+
         else:
-            raise Exception("Oops")
+            raise ValueError(f"Unknown model_stage: {self.model_stage}")

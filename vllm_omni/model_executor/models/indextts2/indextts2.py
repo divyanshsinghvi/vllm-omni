@@ -222,9 +222,9 @@ class IndexTTS2Model(nn.Module):
             spk_cond_emb = spk_cond_emb.to(device=target_device, dtype=target_dtype)
             emo_cond_emb = emo_cond_emb.to(device=target_device, dtype=target_dtype)
 
-            B = spk_cond_emb.shape[0]
-            cond_lengths = torch.full((B,), spk_cond_emb.shape[1], device=spk_cond_emb.device)
-            emo_cond_lengths = torch.full((B,), emo_cond_emb.shape[1], device=emo_cond_emb.device)
+            # cond_lengths uses shape[-1] (feature dim) per original infer_v2.py
+            cond_lengths = torch.tensor([spk_cond_emb.shape[-1]], device=spk_cond_emb.device)
+            emo_cond_lengths = torch.tensor([emo_cond_emb.shape[-1]], device=emo_cond_emb.device)
 
             emovec = self.talker.merge_emovec(
                 spk_cond_emb, emo_cond_emb, cond_lengths, emo_cond_lengths, alpha=emo_alpha
@@ -272,8 +272,8 @@ class IndexTTS2Model(nn.Module):
                 spk_cond_emb,
                 input_ids,
                 emo_cond_emb,
-                cond_lengths=torch.tensor([spk_cond_emb.shape[1]], device=spk_cond_emb.device),
-                emo_cond_lengths=torch.tensor([emo_cond_emb.shape[1]], device=spk_cond_emb.device),
+                cond_lengths=torch.tensor([spk_cond_emb.shape[-1]], device=spk_cond_emb.device),
+                emo_cond_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=spk_cond_emb.device),
                 emo_vec=emovec,
                 do_sample=True,
                 top_p=top_p,
@@ -308,8 +308,8 @@ class IndexTTS2Model(nn.Module):
                 codes,
                 torch.tensor([codes.shape[-1]], device=target_device),
                 emo_cond_emb,
-                cond_mel_lengths=torch.tensor([spk_cond_emb.shape[1]], device=target_device),
-                emo_cond_mel_lengths=torch.tensor([emo_cond_emb.shape[1]], device=target_device),
+                cond_mel_lengths=torch.tensor([spk_cond_emb.shape[-1]], device=target_device),
+                emo_cond_mel_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=target_device),
                 emo_vec=emovec,
                 use_speed=use_speed,
             )

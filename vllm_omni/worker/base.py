@@ -33,23 +33,24 @@ def _get_physical_device_index(local_rank: int) -> int:
 
 def _get_process_gpu_memory(local_rank: int) -> int:
     """Get GPU memory used by current process via pynvml."""
+    from vllm.third_party.pynvml import nvmlDeviceGetCount
+
     my_pid = os.getpid()
     physical_device = _get_physical_device_index(local_rank)
 
     try:
         nvmlInit()
+        device_count = nvmlDeviceGetCount()
+        if physical_device >= device_count:
+            raise RuntimeError(
+                f"Invalid GPU device {physical_device}. Only {device_count} GPU(s) available. "
+                f"Check CUDA_VISIBLE_DEVICES or stage config 'devices' setting."
+            )
+
         handle = nvmlDeviceGetHandleByIndex(physical_device)
         for proc in nvmlDeviceGetComputeRunningProcesses(handle):
             if proc.pid == my_pid:
                 return proc.usedGpuMemory
-        return 0
-    except Exception as e:
-        logger.warning(
-            "Failed to get process GPU memory for device %d (physical %d): %s",
-            local_rank,
-            physical_device,
-            e,
-        )
         return 0
     finally:
         try:

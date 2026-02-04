@@ -83,23 +83,26 @@ class TestGetProcessGpuMemory:
         del tensor
         torch.cuda.empty_cache()
 
-    def test_returns_zero_on_nvml_error(self):
-        """Should return 0 and log warning on NVML error."""
+    def test_raises_on_invalid_device(self):
+        """Should raise RuntimeError on invalid device."""
         from vllm_omni.worker.base import _get_process_gpu_memory
 
-        # Mock nvmlInit to raise an error
-        with mock.patch("vllm_omni.worker.base.nvmlInit", side_effect=Exception("mock error")):
-            memory = _get_process_gpu_memory(0)
-            assert memory == 0
+        with (
+            mock.patch("vllm_omni.worker.base.nvmlInit"),
+            mock.patch("vllm_omni.worker.base.nvmlShutdown"),
+            mock.patch("vllm.third_party.pynvml.nvmlDeviceGetCount", return_value=1),
+        ):
+            with pytest.raises(RuntimeError, match="Invalid GPU device"):
+                _get_process_gpu_memory(5)
 
     def test_returns_zero_when_process_not_found(self):
         """Should return 0 when current process not in GPU process list."""
         from vllm_omni.worker.base import _get_process_gpu_memory
 
-        # Mock to return empty process list
         with (
             mock.patch("vllm_omni.worker.base.nvmlInit"),
             mock.patch("vllm_omni.worker.base.nvmlShutdown"),
+            mock.patch("vllm.third_party.pynvml.nvmlDeviceGetCount", return_value=8),
             mock.patch("vllm_omni.worker.base.nvmlDeviceGetHandleByIndex"),
             mock.patch("vllm_omni.worker.base.nvmlDeviceGetComputeRunningProcesses", return_value=[]),
         ):

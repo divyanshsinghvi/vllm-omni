@@ -120,8 +120,19 @@ class OmniGPUWorkerBase(GPUWorker):
     def determine_available_memory(self) -> int:
         """Process-scoped GPU memory profiling for concurrent stage initialization.
 
-        Uses pynvml to get per-process memory instead of global free memory,
-        allowing multiple stages to initialize concurrently on the same GPU.
+        Algorithm:
+            1. requested_memory = total_gpu_memory * gpu_memory_utilization
+               (computed in init_device from cache_config)
+
+            2. process_memory = memory used by THIS process only (via pynvml)
+               - Uses nvmlDeviceGetComputeRunningProcesses to get per-PID memory
+               - Supports CUDA_VISIBLE_DEVICES with indices, UUIDs, or MIG IDs
+
+            3. available_kv_cache = requested_memory - process_memory
+
+        Fallback:
+            If NVML is unavailable, falls back to profiling data:
+            available = requested - (weights + activations + non_torch)
         """
         if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
             self.model_runner.profile_run()

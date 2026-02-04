@@ -32,12 +32,12 @@ def _get_physical_device_index(local_rank: int) -> int:
 
 
 def _get_process_gpu_memory(local_rank: int) -> int:
-    """Get GPU memory used by THIS process only using pynvml."""
+    """Get GPU memory used by current process via pynvml."""
     my_pid = os.getpid()
     physical_device = _get_physical_device_index(local_rank)
 
-    nvmlInit()
     try:
+        nvmlInit()
         handle = nvmlDeviceGetHandleByIndex(physical_device)
         for proc in nvmlDeviceGetComputeRunningProcesses(handle):
             if proc.pid == my_pid:
@@ -52,7 +52,10 @@ def _get_process_gpu_memory(local_rank: int) -> int:
         )
         return 0
     finally:
-        nvmlShutdown()
+        try:
+            nvmlShutdown()
+        except Exception:
+            pass
 
 
 class OmniGPUWorkerBase(GPUWorker):

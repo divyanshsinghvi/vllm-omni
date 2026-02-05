@@ -132,3 +132,23 @@ class TestGetProcessGpuMemory:
         ):
             result = get_process_gpu_memory(0)
             assert result is None
+
+
+class TestIsProcessScopedMemoryAvailable:
+    def test_returns_true_when_nvml_works(self):
+        from vllm_omni.worker.gpu_memory_utils import is_process_scoped_memory_available
+
+        with (
+            mock.patch("vllm_omni.worker.gpu_memory_utils.nvmlInit"),
+            mock.patch("vllm_omni.worker.gpu_memory_utils.nvmlShutdown"),
+        ):
+            assert is_process_scoped_memory_available() is True
+
+    def test_returns_false_when_nvml_fails(self):
+        from vllm_omni.worker.gpu_memory_utils import is_process_scoped_memory_available
+
+        with mock.patch(
+            "vllm_omni.worker.gpu_memory_utils.nvmlInit",
+            side_effect=Exception("NVML unavailable"),
+        ):
+            assert is_process_scoped_memory_available() is False

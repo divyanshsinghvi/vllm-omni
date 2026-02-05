@@ -19,6 +19,21 @@ from vllm.third_party.pynvml import (
 logger = init_logger(__name__)
 
 
+def is_process_scoped_memory_available() -> bool:
+    """Check if NVML process-scoped memory tracking is available.
+
+    When True, concurrent stage initialization is safe because each
+    process can accurately measure its own GPU memory via NVML.
+    When False, sequential initialization (file locks) is needed.
+    """
+    try:
+        nvmlInit()
+        nvmlShutdown()
+        return True
+    except Exception:
+        return False
+
+
 def parse_cuda_visible_devices() -> list[str | int]:
     """Parse CUDA_VISIBLE_DEVICES into a list of device identifiers.
 

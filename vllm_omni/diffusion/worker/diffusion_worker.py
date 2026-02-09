@@ -34,6 +34,7 @@ from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.diffusion.worker.diffusion_model_runner import DiffusionModelRunner
 from vllm_omni.lora.request import LoRARequest
 from vllm_omni.platforms import current_omni_platform
+from vllm_omni.worker.gpu_memory_utils import get_process_gpu_memory
 
 logger = init_logger(__name__)
 
@@ -114,6 +115,13 @@ class DiffusionWorker:
         self.model_runner.load_model(
             memory_pool_context_fn=self._maybe_get_memory_pool_context,
         )
+        process_memory = get_process_gpu_memory(self.local_rank)
+        if process_memory is not None:
+            logger.info(
+                "Worker %d: Process-scoped GPU memory after model loading: %.2f GiB.",
+                self.rank,
+                process_memory / GiB_bytes,
+            )
         assert self.model_runner.pipeline is not None
         self.lora_manager = DiffusionLoRAManager(
             pipeline=self.model_runner.pipeline,
@@ -177,7 +185,10 @@ class DiffusionWorker:
         """
         from vllm.device_allocator.cumem import CuMemAllocator
 
-        free_bytes_before_sleep = current_omni_platform.get_free_memory()
+        process_memory_before_sleep = get_process_gpu_memory(self.local_rank)
+        free_bytes_before_sleep = None
+        if process_memory_before_sleep is None:
+            free_bytes_before_sleep = current_omni_platform.get_free_memory()
 
         # Save the buffers before level 2 sleep
         if level == 2 and self.model_runner is not None:
@@ -186,14 +197,23 @@ class DiffusionWorker:
 
         allocator = CuMemAllocator.get_instance()
         allocator.sleep(offload_tags=("weights",) if level == 1 else tuple())
-        free_bytes_after_sleep = current_omni_platform.get_free_memory()
-        device_id = self.device.index if self.device.index is not None else 0
-        total = current_omni_platform.get_device_total_memory(device_id)
-        freed_bytes = free_bytes_after_sleep - free_bytes_before_sleep
-        used_bytes = total - free_bytes_after_sleep
+        process_memory_after_sleep = get_process_gpu_memory(self.local_rank)
+        if process_memory_before_sleep is not None and process_memory_after_sleep is not None:
+            freed_bytes = process_memory_before_sleep - process_memory_after_sleep
+            used_bytes = process_memory_after_sleep
+            accounting_scope = "process-scoped"
+        else:
+            free_bytes_after_sleep = current_omni_platform.get_free_memory()
+            assert free_bytes_before_sleep is not None
+            device_id = self.device.index if self.device.index is not None else 0
+            total = current_omni_platform.get_device_total_memory(device_id)
+            freed_bytes = free_bytes_after_sleep - free_bytes_before_sleep
+            used_bytes = total - free_bytes_after_sleep
+            accounting_scope = "device-scoped fallback"
         assert freed_bytes >= 0, "Memory usage increased after sleeping."
         logger.info(
-            "Sleep mode freed %.2f GiB memory, %.2f GiB memory is still in use.",
+            "Sleep mode (%s) freed %.2f GiB memory, %.2f GiB memory is still in use.",
+            accounting_scope,
             freed_bytes / GiB_bytes,
             used_bytes / GiB_bytes,
         )

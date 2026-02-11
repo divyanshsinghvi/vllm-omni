@@ -111,15 +111,15 @@ class DiffusionWorker:
             )
             init_workspace_manager(self.device)
 
-        # Create model runner and load model
-        self.model_runner = DiffusionModelRunner(
-            vllm_config=self.vllm_config,
-            od_config=self.od_config,
-            device=self.device,
-        )
-        self.model_runner.load_model(
-            memory_pool_context_fn=self._maybe_get_memory_pool_context,
-        )
+            # Create model runner and load model
+            self.model_runner = DiffusionModelRunner(
+                vllm_config=self.vllm_config,
+                od_config=self.od_config,
+                device=self.device,
+            )
+            self.model_runner.load_model(
+                memory_pool_context_fn=self._maybe_get_memory_pool_context,
+            )
         process_memory = get_process_gpu_memory(self.local_rank)
         if process_memory is not None:
             logger.info(

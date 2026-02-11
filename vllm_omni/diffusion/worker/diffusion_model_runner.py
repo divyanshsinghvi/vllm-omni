@@ -17,6 +17,7 @@ from contextlib import nullcontext
 import torch
 from torch.profiler import record_function
 from vllm.config import LoadConfig
+from vllm.config.vllm import set_current_vllm_config
 from vllm.logger import init_logger
 from vllm.utils.mem_utils import DeviceMemoryProfiler, GiB_bytes
 
@@ -93,10 +94,11 @@ class DiffusionModelRunner:
 
         with get_memory_context():
             with DeviceMemoryProfiler() as m:
-                self.pipeline = model_loader.load_model(
-                    od_config=self.od_config,
-                    load_device=load_device,
-                )
+                with set_current_vllm_config(self.vllm_config):
+                    self.pipeline = model_loader.load_model(
+                        od_config=self.od_config,
+                        load_device=load_device,
+                    )
         time_after_load = time.perf_counter()
 
         logger.info(

@@ -94,11 +94,10 @@ class DiffusionModelRunner:
 
         with get_memory_context():
             with DeviceMemoryProfiler() as m:
-                with set_current_vllm_config(self.vllm_config):
-                    self.pipeline = model_loader.load_model(
-                        od_config=self.od_config,
-                        load_device=load_device,
-                    )
+                self.pipeline = model_loader.load_model(
+                    od_config=self.od_config,
+                    load_device=load_device,
+                )
         time_after_load = time.perf_counter()
 
         logger.info(

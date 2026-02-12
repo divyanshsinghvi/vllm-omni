@@ -17,7 +17,6 @@ from contextlib import nullcontext
 import torch
 from torch.profiler import record_function
 from vllm.config import LoadConfig
-from vllm.config.vllm import set_current_vllm_config
 from vllm.logger import init_logger
 from vllm.utils.mem_utils import DeviceMemoryProfiler, GiB_bytes
 

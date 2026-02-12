@@ -69,11 +69,6 @@ def _sequential_init_lock(engine_args: dict[str, Any], stage_init_timeout: int =
 
     nvml_available = is_process_scoped_memory_available()
     pid_host = detect_pid_host()
-    logger.info(
-        "Init lock check: is_process_scoped_memory_available=%s, detect_pid_host=%s",
-        nvml_available,
-        pid_host,
-    )
 
     if nvml_available and pid_host:
         logger.info("Both checks passed — using parallel init, skipping locks")

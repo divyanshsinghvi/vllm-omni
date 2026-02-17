@@ -219,8 +219,7 @@ class OmniNPUModelRunner(NPUModelRunner):
             try:
                 if getattr(new_req_data, "additional_information", None) is not None:
                     warnings.warn(
-                        "additional_information on request data is deprecated, "
-                        "use model_intermediate_buffer",
+                        "additional_information on request data is deprecated, use model_intermediate_buffer",
                         DeprecationWarning,
                         stacklevel=2,
                     )
@@ -670,8 +669,7 @@ class OmniNPUModelRunner(NPUModelRunner):
                 payload_info = getattr(nr, "additional_information", None)
                 if payload_info is not None:
                     warnings.warn(
-                        "additional_information on request data is deprecated, "
-                        "use model_intermediate_buffer",
+                        "additional_information on request data is deprecated, use model_intermediate_buffer",
                         DeprecationWarning,
                         stacklevel=2,
                     )
@@ -797,8 +795,7 @@ class OmniNPUModelRunner(NPUModelRunner):
             payload_info = getattr(new_req, "additional_information", None)
             if payload_info is not None:
                 warnings.warn(
-                    "additional_information on request data is deprecated, "
-                    "use model_intermediate_buffer",
+                    "additional_information on request data is deprecated, use model_intermediate_buffer",
                     DeprecationWarning,
                     stacklevel=2,
                 )
@@ -806,8 +803,7 @@ class OmniNPUModelRunner(NPUModelRunner):
 
         if hasattr(scheduler_output.scheduled_cached_reqs, "additional_information"):
             warnings.warn(
-                "additional_information on scheduled_cached_reqs is deprecated, "
-                "use model_intermediate_buffer",
+                "additional_information on scheduled_cached_reqs is deprecated, use model_intermediate_buffer",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -933,7 +929,6 @@ class OmniNPUModelRunner(NPUModelRunner):
             if self.vllm_config.model_config.async_chunk:
                 self._update_additional_information(scheduler_output)
             for req_index, req_id in enumerate(self.input_batch.req_ids):
-                req_state = self.requests.get(req_id)
                 req_infos = self.model_intermediate_buffer.get(req_id, {})
                 start_offset = int(self.query_start_loc.cpu[req_index])
                 sched_tokens = int(num_scheduled_tokens_np[req_index])

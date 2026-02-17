@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import math
+import warnings
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -38,7 +39,7 @@ class OmniNPUModelRunner(NPUModelRunner):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._omni_per_req_additional_information: dict[str, dict] | None = None
+        self.model_intermediate_buffer: dict[str, dict[str, Any]] = {}
         self._omni_num_scheduled_tokens_np: np.ndarray | None = None
         self._omni_last_model_output: object | None = None
 
@@ -121,6 +122,7 @@ class OmniNPUModelRunner(NPUModelRunner):
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
             self.requests.pop(req_id, None)
+            self.model_intermediate_buffer.pop(req_id, None)
             self.num_prompt_logprobs.pop(req_id, None)
         # Remove the finished requests from the persistent batch.
         # NOTE(woosuk): There could be an edge case where finished_req_ids and
@@ -216,6 +218,12 @@ class OmniNPUModelRunner(NPUModelRunner):
             # Decode additional_information payloads (dictionary)
             try:
                 if getattr(new_req_data, "additional_information", None) is not None:
+                    warnings.warn(
+                        "additional_information on request data is deprecated, "
+                        "use model_intermediate_buffer",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
                     payload_info = new_req_data.additional_information
                     info_dict = {}
                     if isinstance(payload_info, dict):
@@ -233,6 +241,8 @@ class OmniNPUModelRunner(NPUModelRunner):
                                 else:
                                     info_dict[k] = entry.list_data
                     if info_dict:
+                        self.model_intermediate_buffer[req_id] = info_dict
+                        # Backward compatible: mirror to old setattr location
                         setattr(
                             self.requests[req_id],
                             "additional_information_cpu",
@@ -659,6 +669,12 @@ class OmniNPUModelRunner(NPUModelRunner):
                 # additional_information
                 payload_info = getattr(nr, "additional_information", None)
                 if payload_info is not None:
+                    warnings.warn(
+                        "additional_information on request data is deprecated, "
+                        "use model_intermediate_buffer",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
                     info_dict = {}
                     if isinstance(payload_info, dict):
                         info_dict = payload_info
@@ -677,17 +693,18 @@ class OmniNPUModelRunner(NPUModelRunner):
                                 else:
                                     info_dict[k] = getattr(entry, "list_data", None)
                     if info_dict and req_id in self.requests:
+                        self.model_intermediate_buffer[req_id] = info_dict
+                        # Backward compatible: mirror to old setattr location
                         setattr(self.requests[req_id], "additional_information_cpu", info_dict)
         except Exception as e:
             logger.error(f"Error decoding prompt_embeds / additional_information: {e}")
 
     def _gather_runtime_additional_information(self) -> list[dict]:
-        """Gather per-request additional_information stored in request state in batch order."""
+        """Gather per-request model_intermediate_buffer in batch order."""
         per_req_runtime_info = []
         for req_id in self.input_batch.req_ids:
-            req_state = self.requests.get(req_id)
-            info = getattr(req_state, "additional_information_cpu", None) if req_state is not None else None
-            if info and isinstance(info, dict):
+            info = self.model_intermediate_buffer.get(req_id, {})
+            if info:
                 per_req_runtime_info.append(info)
                 if "thinker_reply_part_per_request" in info:
                     q = info["thinker_reply_part_per_request"]
@@ -707,12 +724,13 @@ class OmniNPUModelRunner(NPUModelRunner):
         return req_token_spans
 
     def _build_model_kwargs_extra(self) -> dict:
-        """Build extra keyword arguments passed to the model for this step, including:
-        - runtime_additional_information: per-request additional information stored in request state
-        """
+        """Build extra keyword arguments passed to the model for this step."""
         model_kwargs_extra: dict[str, object] = {}
         try:
-            model_kwargs_extra["runtime_additional_information"] = self._gather_runtime_additional_information()
+            buffer_map = self._gather_runtime_additional_information()
+            model_kwargs_extra["model_intermediate_buffer"] = buffer_map
+            # Backward compatible: also emit old name
+            model_kwargs_extra["runtime_additional_information"] = buffer_map
         except Exception as e:
             logger.error(f"[OMNI DEBUG] Error building model_kwargs_extra: {e}")
             import traceback
@@ -727,23 +745,20 @@ class OmniNPUModelRunner(NPUModelRunner):
         num_scheduled_tokens_np: np.ndarray,
         scheduler_output: "SchedulerOutput",
     ) -> None:
-        """Process model-provided per-request additional_information updates and merge into request state."""
+        """Process model-provided per-request updates and merge into model_intermediate_buffer."""
         try:
             # execute the custom postprocess function
             # TODO(Peiqi): do we have a more elegant way to do this?
             if hasattr(self.model, "has_postprocess") and self.model.has_postprocess:
                 for req_index, req_id in enumerate(self.input_batch.req_ids):
-                    req_state = self.requests.get(req_id)
-                    req_infos = (
-                        getattr(req_state, "additional_information_cpu", None) if req_state is not None else None
-                    )
+                    req_infos = self.model_intermediate_buffer.get(req_id, {})
                     start_offset = int(self.query_start_loc.cpu[req_index])
                     sched_tokens = int(num_scheduled_tokens_np[req_index])
                     s, e = start_offset, start_offset + sched_tokens
                     # only consider to store data into update dict.
                     hidden_states_slice = hidden_states[s:e]
                     update_dict = self.model.postprocess(hidden_states_slice, **req_infos)
-                    self._merge_additional_information_update(req_id, update_dict)
+                    self._merge_intermediate_buffer(req_id, update_dict)
         except Exception as e:
             logger.error(
                 f"Error merging for requests:{self.input_batch.req_ids} "
@@ -780,9 +795,22 @@ class OmniNPUModelRunner(NPUModelRunner):
     def _update_additional_information(self, scheduler_output: "SchedulerOutput") -> None:
         for new_req in scheduler_output.scheduled_new_reqs:
             payload_info = getattr(new_req, "additional_information", None)
+            if payload_info is not None:
+                warnings.warn(
+                    "additional_information on request data is deprecated, "
+                    "use model_intermediate_buffer",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
             self._merge_additional_information_update(new_req.req_id, payload_info)
 
         if hasattr(scheduler_output.scheduled_cached_reqs, "additional_information"):
+            warnings.warn(
+                "additional_information on scheduled_cached_reqs is deprecated, "
+                "use model_intermediate_buffer",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             cached_infos = getattr(scheduler_output.scheduled_cached_reqs, "additional_information", {})
             if isinstance(cached_infos, dict):
                 for req_id, req_infos in cached_infos.items():
@@ -905,9 +933,8 @@ class OmniNPUModelRunner(NPUModelRunner):
             if self.vllm_config.model_config.async_chunk:
                 self._update_additional_information(scheduler_output)
             for req_index, req_id in enumerate(self.input_batch.req_ids):
-                # Try to get additional_information from multiple sources
                 req_state = self.requests.get(req_id)
-                req_infos = getattr(req_state, "additional_information_cpu", None) if req_state is not None else None
+                req_infos = self.model_intermediate_buffer.get(req_id, {})
                 start_offset = int(self.query_start_loc.cpu[req_index])
                 sched_tokens = int(num_scheduled_tokens_np[req_index])
                 s, e = start_offset, start_offset + sched_tokens
@@ -988,11 +1015,11 @@ class OmniNPUModelRunner(NPUModelRunner):
         """Inject omni-specific kwargs into forward and cache model output"""
         model_kwargs_extra = self._build_model_kwargs_extra()
 
-        runtime_info = model_kwargs_extra.get("runtime_additional_information", [])
+        runtime_info = model_kwargs_extra.get("model_intermediate_buffer", [])
         if runtime_info:
             for i, info in enumerate(runtime_info):
                 if info:
-                    logger.debug(f"[OMNI] req[{i}] runtime_additional_information keys: {list(info.keys())}")
+                    logger.debug(f"[OMNI] req[{i}] model_intermediate_buffer keys: {list(info.keys())}")
 
         model_output = super()._model_forward(
             input_ids=input_ids,
@@ -1008,21 +1035,23 @@ class OmniNPUModelRunner(NPUModelRunner):
         self._omni_last_model_output = model_output
         return model_output
 
-    def _merge_additional_information_update(self, req_id: str, upd: dict) -> None:
-        req_state = self.requests.get(req_id)
-        if req_state is None:
+    def _merge_intermediate_buffer(self, req_id: str, upd: dict) -> None:
+        if not upd:
             return
-        existing = getattr(req_state, "additional_information_cpu", {})
-        if not isinstance(existing, dict):
-            existing = {}
-        merged = dict(existing)
+        existing = dict(self.model_intermediate_buffer.get(req_id, {}))
         for k, v in upd.items():
             if isinstance(v, torch.Tensor):
-                merged[k] = v.detach().to("cpu").contiguous()
+                existing[k] = v.detach().to("cpu").contiguous()
             elif isinstance(v, list):
-                merged[k] = [
+                existing[k] = [
                     (item.detach().to("cpu").contiguous() if isinstance(item, torch.Tensor) else item) for item in v
                 ]
             else:
-                merged[k] = v
-        setattr(req_state, "additional_information_cpu", merged)
+                existing[k] = v
+        self.model_intermediate_buffer[req_id] = existing
+        # Backward compatible: mirror to old setattr location
+        req_state = self.requests.get(req_id)
+        if req_state is not None:
+            setattr(req_state, "additional_information_cpu", existing)
+
+    _merge_additional_information_update = _merge_intermediate_buffer

@@ -112,9 +112,21 @@ class Qwen3TTSModelForGeneration(nn.Module):
 
         # Extract additional parameters from kwargs that the generation methods expect
 
-        runtime_additional_information = kwargs.get("runtime_additional_information", [{}])
+        runtime_additional_information = kwargs.get("model_intermediate_buffer") or kwargs.get(
+            "runtime_additional_information", [{}]
+        )
+        if "runtime_additional_information" in kwargs and "model_intermediate_buffer" not in kwargs:
+            import warnings
+
+            warnings.warn(
+                "runtime_additional_information is deprecated, use model_intermediate_buffer",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         if isinstance(runtime_additional_information, list) and len(runtime_additional_information) > 0:
             runtime_additional_information = runtime_additional_information[0]
+        # Copy to avoid mutating the shared buffer dict
+        runtime_additional_information = dict(runtime_additional_information)
         text = runtime_additional_information.pop("text", [""])[0]
         # Extract task_type from kwargs, default to "instruct"
         task_type = runtime_additional_information.pop("task_type", [self.task_type])[0]

@@ -112,14 +112,17 @@ def mel_filters(device, n_mels: int) -> torch.Tensor:
     assert n_mels in {80, 128}, f"Unsupported n_mels: {n_mels}"
 
     filters_path = os.path.join(os.path.dirname(__file__), "assets", "mel_filters.npz")
-    # TODO To remove whisper dependency this needs to be downloaded. Ideally this should be
-    # passed with a path argument if user don't want to store it here.
     if not os.path.exists(filters_path):
-        import urllib.request
-
-        os.makedirs(os.path.dirname(filters_path), exist_ok=True)
-        url = "https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/mel_filters.npz"
-        urllib.request.urlretrieve(url, filters_path)
+        source_url = "https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/mel_filters.npz"
+        raise FileNotFoundError(
+            "Missing CosyVoice3 mel filter asset:\n"
+            f"  {filters_path}\n"
+            "Download it manually from:\n"
+            f"  {source_url}\n"
+            "Example:\n"
+            f"  mkdir -p {os.path.dirname(filters_path)} && "
+            f"curl -L {source_url} -o {filters_path}"
+        )
 
     with np.load(filters_path, allow_pickle=False) as f:
         return torch.from_numpy(f[f"mel_{n_mels}"]).to(device)

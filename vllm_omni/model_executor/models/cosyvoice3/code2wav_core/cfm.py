@@ -172,7 +172,6 @@ class ConditionalCFM(BASECFM):
 class CausalConditionalCFM(ConditionalCFM):
     def __init__(self, in_channels, cfm_params, n_spks=1, spk_emb_dim=64, estimator: torch.nn.Module = None):
         super().__init__(in_channels, cfm_params, n_spks, spk_emb_dim, estimator)
-        self.rand_noise = torch.randn([1, 80, 50 * 300])
 
     @torch.inference_mode()
     def forward(self, mu, mask, n_timesteps, temperature=1.0, spks=None, cond=None):
@@ -194,7 +193,14 @@ class CausalConditionalCFM(ConditionalCFM):
                 shape: (batch_size, n_feats, mel_timesteps)
         """
 
-        z = self.rand_noise[:, :, : mu.size(2)].to(mu.device).to(mu.dtype) * temperature
+        z = (
+            torch.randn(
+                (mu.size(0), mu.size(1), mu.size(2)),
+                device=mu.device,
+                dtype=mu.dtype,
+            )
+            * temperature
+        )
 
         # fix prompt and overlap part mu and z
         t_span = torch.linspace(0, 1, n_timesteps + 1, device=mu.device, dtype=mu.dtype)

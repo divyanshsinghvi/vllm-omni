@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import os
 from collections.abc import Iterable, Mapping, Sequence
 from functools import partial
@@ -373,8 +375,8 @@ class CosyVoice3Model(
         **kwargs: object,
     ) -> OmniOutput:
         if self.model_stage == "talker":
-            if inputs_embeds is None and input_ids is not None:
-                raise Exception(f"inputs_embeds {input_ids} {inputs_embeds}")
+            if inputs_embeds is None:
+                inputs_embeds = self.embed_input_ids(input_ids)
 
             # [total_tokens, hidden]
             hidden_states = self.model.llm(inputs_embeds, positions)
@@ -414,7 +416,7 @@ class CosyVoice3Model(
                 multimodal_outputs={"audio": tts_speech},
             )
         else:
-            raise ValueError(f"Stop it! {input_ids}")
+            raise ValueError(f"Unsupported model_stage: {self.model_stage}")
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         if self.model_stage == "talker":

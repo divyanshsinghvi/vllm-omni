@@ -39,11 +39,11 @@ def run_e2e():
     args = parser.parse_args()
     # Ensure tokenizer directory exists
     if not os.path.exists(args.tokenizer):
-        raise Exception(f"{args.tokenizer} does not exist!")
+        raise FileNotFoundError(f"{args.tokenizer} does not exist!")
 
     # Ensure stage config exists
     if not os.path.exists(args.stage_config):
-        raise Exception(f"{args.stage_config} does not exist!")
+        raise FileNotFoundError(f"{args.stage_config} does not exist!")
 
     print(f"Initializing cosyvoice E2E with model={args.model}")
 

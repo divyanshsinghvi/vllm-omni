@@ -3,15 +3,17 @@
 # Adopted from https://github.com/FunAudioLLM/CosyVoice/tree/main/cosyvoice/flow
 """Conditional Flow Matching (CFM) classes for audio generation."""
 
-import logging
 from abc import ABC
 
 import torch
 import torch.nn as nn
 from omegaconf import DictConfig
 from torch.nn import functional as F
+from vllm.logger import init_logger
 
 from vllm_omni.model_executor.models.cosyvoice3.utils import make_pad_mask
+
+logger = init_logger(__name__)
 
 
 class BASECFM(torch.nn.Module, ABC):
@@ -105,8 +107,6 @@ class ConditionalCFM(BASECFM):
         t, _, dt = t_span[0], t_span[-1], t_span[1] - t_span[0]
         t = t.unsqueeze(dim=0)
 
-        # I am storing this because I can later plot it by putting a debugger here and saving it to a file
-        # Or in future might add like a return_all_steps flag
         sol = []
 
         # Do not use concat, it may cause memory format changed and trt infer with wrong results!
@@ -252,7 +252,7 @@ class CausalMaskedDiffWithDiT(torch.nn.Module):
         self.vocab_size = vocab_size
         self.output_type = output_type
         self.input_frame_rate = input_frame_rate
-        logging.info(f"input frame rate={self.input_frame_rate}")
+        logger.info(f"input frame rate={self.input_frame_rate}")
         self.input_embedding = nn.Embedding(vocab_size, input_size)
         self.spk_embed_affine_layer = torch.nn.Linear(spk_embed_dim, output_size)
         self.pre_lookahead_len = pre_lookahead_len
@@ -303,7 +303,6 @@ class CausalMaskedDiffWithDiT(torch.nn.Module):
         conds = conds.transpose(1, 2)
 
         mask = (~make_pad_mask(torch.tensor([mel_len1 + mel_len2]))).to(h)
-        # breakpoint()
         feat, _ = self.decoder(
             mu=h.transpose(1, 2).contiguous(),
             mask=mask.unsqueeze(1),

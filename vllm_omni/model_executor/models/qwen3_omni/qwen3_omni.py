@@ -441,7 +441,10 @@ class Qwen3OmniMoeForConditionalGeneration(
             # preprocess function, the code_predictor_codes are stored in the info_dict list.
             # We need to merge the tensors from different requests into a single tensor.
             # In the future, we may allow user to custom an aggregated function.
-            info_dicts = kwargs.get("model_intermediate_buffer") or kwargs.get("runtime_additional_information")
+            info_dicts = kwargs.get("model_intermediate_buffer")
+            if info_dicts is None:
+                info_dicts = kwargs.get("runtime_additional_information")
+
             if "runtime_additional_information" in kwargs and "model_intermediate_buffer" not in kwargs:
                 import warnings
 

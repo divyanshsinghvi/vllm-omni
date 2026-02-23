@@ -112,9 +112,9 @@ class Qwen3TTSModelForGeneration(nn.Module):
 
         # Extract additional parameters from kwargs that the generation methods expect
 
-        runtime_additional_information = kwargs.get("model_intermediate_buffer") or kwargs.get(
-            "runtime_additional_information", [{}]
-        )
+        runtime_additional_information = kwargs.get("model_intermediate_buffer")
+        if runtime_additional_information is None:
+            runtime_additional_information = kwargs.get("runtime_additional_information", [{}])
         if "runtime_additional_information" in kwargs and "model_intermediate_buffer" not in kwargs:
             import warnings
 

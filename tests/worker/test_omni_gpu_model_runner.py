@@ -179,3 +179,12 @@ def test_merge_intermediate_buffer_skips_empty_update():
     OmniGPUModelRunner._merge_intermediate_buffer(runner, "r1", {})
 
     assert "r1" not in runner.model_intermediate_buffer
+
+
+def test_merge_intermediate_buffer_skips_unknown_req_id():
+    """Validate that merge is a no-op when req_id is not in self.requests."""
+    runner = _make_runner(req_ids=("r1",), hidden_size=4)
+
+    OmniGPUModelRunner._merge_intermediate_buffer(runner, "unknown_req", {"key": torch.tensor([1.0])})
+
+    assert "unknown_req" not in runner.model_intermediate_buffer

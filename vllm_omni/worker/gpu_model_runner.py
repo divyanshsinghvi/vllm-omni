@@ -1166,7 +1166,10 @@ class OmniGPUModelRunner(GPUModelRunner):
         return model_output
 
     def _merge_intermediate_buffer(self, req_id: str, upd: dict) -> None:
-        if not upd:
+        if not isinstance(upd, dict) or not upd:
+            return
+        req_state = self.requests.get(req_id)
+        if req_state is None:
             return
         existing = dict(self.model_intermediate_buffer.get(req_id, {}))
         for k, v in upd.items():
@@ -1180,8 +1183,6 @@ class OmniGPUModelRunner(GPUModelRunner):
                 existing[k] = v
         self.model_intermediate_buffer[req_id] = existing
         # Backward compatible: mirror to old setattr location
-        req_state = self.requests.get(req_id)
-        if req_state is not None:
-            setattr(req_state, "additional_information_cpu", existing)
+        setattr(req_state, "additional_information_cpu", existing)
 
     _merge_additional_information_update = _merge_intermediate_buffer

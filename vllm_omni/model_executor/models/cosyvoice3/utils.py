@@ -26,7 +26,7 @@ def _get_mel_basis(
     n_fft: int,
     num_mels: int,
     fmin: float,
-    fmax: float,
+    fmax: float | None,
     device_str: str,
 ) -> torch.Tensor:
     mel = librosa_mel_fn(sr=sampling_rate, n_fft=n_fft, n_mels=num_mels, fmin=fmin, fmax=fmax)
@@ -45,7 +45,7 @@ def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin,
         int(n_fft),
         int(num_mels),
         float(fmin),
-        float(fmax),
+        fmax,
         device_str,
     )
     window = _get_hann_window(int(win_size), device_str)

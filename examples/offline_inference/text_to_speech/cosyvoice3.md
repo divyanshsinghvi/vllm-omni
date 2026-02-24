@@ -25,6 +25,13 @@ Add `config.json` in `pretrained_models/Fun-CosyVoice3-0.5B/`:
 }
 ```
 
+> **Why `config.json` is required:**
+> `AutoConfig.register("cosyvoice3", CosyVoice3Config)` only registers a class mapping.
+> The loader still needs `model_type: "cosyvoice3"` from `config.json` to select that class.
+> If no `config.json` is present, model type cannot be inferred automatically.
+> If your downloaded checkpoint already includes a valid `config.json` with
+> `model_type: "cosyvoice3"`, this manual step can be skipped.
+
 Run the offline verification script:
 ```
 python examples/offline_inference/text_to_speech/verify_e2e_cosyvoice.py \

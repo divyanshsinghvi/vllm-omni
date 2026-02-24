@@ -2,10 +2,12 @@
 
 Install dependencies:
 ```
-uv pip install onnxruntime==1.23.2 x-transformers==2.12.2 einops>=0.8.1
+uv pip install -e .
 ```
 
-> **Note:** `librosa` and `soundfile` are also required but already included in `pyproject.toml`.
+> **Note:** This includes required libraries such as `librosa`, `soundfile`,
+> `onnxruntime`, `x-transformers`, and `einops` via
+> `requirements/common.txt` and platform-specific requirements files.
 
 Download the model snapshot:
 ```

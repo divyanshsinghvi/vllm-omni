@@ -37,8 +37,11 @@ def text2flow(
     if prompt_payload is None:
         raise RuntimeError(f"Missing prompt payload for {source_output.request_id}")
 
-    multi_modal_data = source_output.multimodal_output
-    output_ids = source_output.outputs[0].token_ids
+    output = source_output.outputs[0]
+    multi_modal_data = output.multimodal_output
+    if multi_modal_data is None:
+        raise RuntimeError(f"Missing multimodal_output for request {source_output.request_id}")
+    output_ids = output.token_ids
     prefix_ids = source_output.prompt_token_ids
     multi_modal_data["prefix_ids"] = prefix_ids
     engine_input = OmniTokensPrompt(prompt_token_ids=output_ids, additional_information=multi_modal_data)

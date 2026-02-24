@@ -53,6 +53,12 @@ class CosyVoice3MultiModalProcessingInfo(BaseProcessingInfo):
         """
         return {"audio": None}
 
+    def get_data_parser(self):
+        return MultiModalDataParser(
+            target_sr=self.ctx.get_hf_config().target_sr,
+            expected_hidden_size=self._get_expected_hidden_size(),
+        )
+
 
 class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModalProcessingInfo]):
     def _call_hf_processor(
@@ -201,12 +207,6 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
                 insertion=insertion_end,
             ),
         ]
-
-    def _get_data_parser(self) -> MultiModalDataParser:
-        """For audio you need to define target_sr;
-        so need to create this data parser to avoid those errors
-        """
-        return MultiModalDataParser(target_sr=self.info.ctx.get_hf_config().target_sr)
 
 
 class CosyVoice3DummyInputsBuilder(BaseDummyInputsBuilder[CosyVoice3MultiModalProcessingInfo]):

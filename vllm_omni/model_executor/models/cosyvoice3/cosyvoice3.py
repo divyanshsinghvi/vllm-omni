@@ -61,6 +61,38 @@ class CosyVoice3MultiModalProcessingInfo(BaseProcessingInfo):
 
 
 class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModalProcessingInfo]):
+    def _ensure_cached_runtime_components(self, model_dir: str, config: CosyVoice3Config) -> None:
+        cached_model_dir = getattr(self, "_cached_model_dir", None)
+        if cached_model_dir == model_dir:
+            return
+
+        import onnxruntime
+
+        from vllm_omni.model_executor.models.cosyvoice3.tokenizer import get_qwen_tokenizer
+        from vllm_omni.model_executor.models.cosyvoice3.utils import mel_spectrogram
+
+        option = onnxruntime.SessionOptions()
+        option.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
+        option.intra_op_num_threads = 1
+
+        self.tokenizer = get_qwen_tokenizer(
+            token_path=os.path.join(model_dir, config.qwen_pretrain_path),
+            skip_special_tokens=config.skip_special_tokens,
+            version=config.version,
+        )
+        self.speech_tokenizer = onnxruntime.InferenceSession(
+            os.path.join(model_dir, config.speech_tokenizer_path),
+            sess_options=option,
+            providers=["CUDAExecutionProvider" if torch.cuda.is_available() else "CPUExecutionProvider"],
+        )
+        self.feat_extractor = partial(mel_spectrogram, **getattr(config, "feat_extractor", {}))
+        self.campplus_session = onnxruntime.InferenceSession(
+            os.path.join(model_dir, config.campplus_onxx_path),
+            sess_options=option,
+            providers=["CPUExecutionProvider"],
+        )
+        self._cached_model_dir = model_dir
+
     def _call_hf_processor(
         self,
         prompt: str,
@@ -74,35 +106,9 @@ class CosyVoice3MultiModalProcessor(BaseMultiModalProcessor[CosyVoice3MultiModal
         _call_hf_processor takes input prompt and mm_data and returns
         token ids and tensors
         """
-        import onnxruntime
-
-        from vllm_omni.model_executor.models.cosyvoice3.tokenizer import get_qwen_tokenizer
-
         config = self.info.ctx.get_hf_config()
         model_dir = self.info.ctx.model_config.model
-        self.tokenizer = get_qwen_tokenizer(
-            token_path=os.path.join(model_dir, config.qwen_pretrain_path),
-            skip_special_tokens=config.skip_special_tokens,
-            version=config.version,
-        )
-
-        option = onnxruntime.SessionOptions()
-        option.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
-        option.intra_op_num_threads = 1
-        self.speech_tokenizer = onnxruntime.InferenceSession(
-            os.path.join(model_dir, config.speech_tokenizer_path),
-            sess_options=option,
-            providers=["CUDAExecutionProvider" if torch.cuda.is_available() else "CPUExecutionProvider"],
-        )
-
-        from vllm_omni.model_executor.models.cosyvoice3.utils import mel_spectrogram
-
-        feat_cfg = getattr(config, "feat_extractor", {})
-        self.feat_extractor = partial(mel_spectrogram, **feat_cfg)
-        campplus_full_path = os.path.join(model_dir, config.campplus_onxx_path)
-        self.campplus_session = onnxruntime.InferenceSession(
-            campplus_full_path, sess_options=option, providers=["CPUExecutionProvider"]
-        )
+        self._ensure_cached_runtime_components(model_dir, config)
 
         audio = mm_data.get("audio", None)
 

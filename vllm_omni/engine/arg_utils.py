@@ -76,6 +76,7 @@ class OmniEngineArgs(EngineArgs):
     stage_connector_spec: dict[str, Any] = field(default_factory=dict)
     async_chunk: bool = False
     omni_kv_config: dict | None = None
+    quantization_config: Any | None = None
     worker_type: str | None = None
 
     def __post_init__(self) -> None:
@@ -232,6 +233,7 @@ class AsyncOmniEngineArgs(AsyncEngineArgs):
     stage_connector_spec: dict[str, Any] = field(default_factory=dict)
     async_chunk: bool = False
     omni_kv_config: dict | None = None
+    quantization_config: Any | None = None
     worker_type: str | None = None
 
     def __post_init__(self) -> None:

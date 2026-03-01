@@ -2,7 +2,6 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import math
-import warnings
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -40,7 +39,6 @@ class OmniNPUModelRunner(NPUModelRunner):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model_intermediate_buffer: dict[str, dict[str, Any]] = {}
-        self._additional_info_compat_warned: bool = False
         self._omni_num_scheduled_tokens_np: np.ndarray | None = None
         self._omni_last_model_output: object | None = None
 
@@ -219,13 +217,9 @@ class OmniNPUModelRunner(NPUModelRunner):
             # Decode additional_information payloads (dictionary)
             try:
                 if getattr(new_req_data, "additional_information", None) is not None:
-                    if not self._additional_info_compat_warned:
-                        self._additional_info_compat_warned = True
-                        warnings.warn(
-                            "additional_information on request data is deprecated, use model_intermediate_buffer",
-                            DeprecationWarning,
-                            stacklevel=2,
-                        )
+                    logger.warning_once(
+                        "additional_information on request data is deprecated, use model_intermediate_buffer"
+                    )
                     payload_info = new_req_data.additional_information
                     info_dict = {}
                     if isinstance(payload_info, dict):
@@ -671,13 +665,9 @@ class OmniNPUModelRunner(NPUModelRunner):
                 # additional_information
                 payload_info = getattr(nr, "additional_information", None)
                 if payload_info is not None:
-                    if not self._additional_info_compat_warned:
-                        self._additional_info_compat_warned = True
-                        warnings.warn(
-                            "additional_information on request data is deprecated, use model_intermediate_buffer",
-                            DeprecationWarning,
-                            stacklevel=2,
-                        )
+                    logger.warning_once(
+                        "additional_information on request data is deprecated, use model_intermediate_buffer"
+                    )
                     info_dict = {}
                     if isinstance(payload_info, dict):
                         info_dict = payload_info
@@ -798,23 +788,16 @@ class OmniNPUModelRunner(NPUModelRunner):
     def _update_additional_information(self, scheduler_output: "SchedulerOutput") -> None:
         for new_req in scheduler_output.scheduled_new_reqs:
             payload_info = getattr(new_req, "additional_information", None)
-            if payload_info is not None and not self._additional_info_compat_warned:
-                self._additional_info_compat_warned = True
-                warnings.warn(
-                    "additional_information on request data is deprecated, use model_intermediate_buffer",
-                    DeprecationWarning,
-                    stacklevel=2,
+            if payload_info is not None:
+                logger.warning_once(
+                    "additional_information on request data is deprecated, use model_intermediate_buffer"
                 )
             self._merge_additional_information_update(new_req.req_id, payload_info)
 
         if hasattr(scheduler_output.scheduled_cached_reqs, "additional_information"):
-            if not self._additional_info_compat_warned:
-                self._additional_info_compat_warned = True
-                warnings.warn(
-                    "additional_information on scheduled_cached_reqs is deprecated, use model_intermediate_buffer",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            logger.warning_once(
+                "additional_information on scheduled_cached_reqs is deprecated, use model_intermediate_buffer"
+            )
             cached_infos = getattr(scheduler_output.scheduled_cached_reqs, "additional_information", {})
             if isinstance(cached_infos, dict):
                 for req_id, req_infos in cached_infos.items():
@@ -1058,4 +1041,6 @@ class OmniNPUModelRunner(NPUModelRunner):
         # Backward compatible: mirror to old setattr location
         setattr(req_state, "additional_information_cpu", existing)
 
-    _merge_additional_information_update = _merge_intermediate_buffer
+    def _merge_additional_information_update(self, req_id, upd):
+        logger.warning_once("_merge_additional_information_update is deprecated, use _merge_intermediate_buffer")
+        return self._merge_intermediate_buffer(req_id, upd)

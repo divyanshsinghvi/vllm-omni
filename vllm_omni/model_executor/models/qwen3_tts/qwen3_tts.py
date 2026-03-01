@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import base64
+import copy
 import io
 import urllib.request
 from collections.abc import Iterable
@@ -65,7 +66,6 @@ class VoiceClonePromptItem:
 class Qwen3TTSModelForGeneration(nn.Module):
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
-        self._additional_info_compat_warned: bool = False
         model_path = vllm_config.model_config.model
 
         # Check if flash-attn is installed
@@ -117,19 +117,10 @@ class Qwen3TTSModelForGeneration(nn.Module):
         if runtime_additional_information is None:
             runtime_additional_information = kwargs.get("runtime_additional_information", [{}])
         if "runtime_additional_information" in kwargs and "model_intermediate_buffer" not in kwargs:
-            if not self._additional_info_compat_warned:
-                self._additional_info_compat_warned = True
-                import warnings
-
-                warnings.warn(
-                    "runtime_additional_information is deprecated, use model_intermediate_buffer",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            logger.warning_once("runtime_additional_information is deprecated, use model_intermediate_buffer")
         if isinstance(runtime_additional_information, list) and len(runtime_additional_information) > 0:
             runtime_additional_information = runtime_additional_information[0]
-        # Copy to avoid mutating the shared buffer dict
-        runtime_additional_information = dict(runtime_additional_information)
+        runtime_additional_information = copy.deepcopy(runtime_additional_information)
         text = runtime_additional_information.pop("text", [""])[0]
         # Extract task_type from kwargs, default to "instruct"
         task_type = runtime_additional_information.pop("task_type", [self.task_type])[0]

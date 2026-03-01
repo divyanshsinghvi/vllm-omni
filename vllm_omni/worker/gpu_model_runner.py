@@ -999,16 +999,6 @@ class OmniGPUModelRunner(GPUModelRunner):
                 start_offset = int(self.query_start_loc.cpu[req_index])
                 self.inputs_embeds[start_offset : start_offset + overlay_len].copy_(src)
 
-    def _update_request_information(self, request_id: str, payload_info: dict) -> None:
-        """Update per-request additional_information stored in request state."""
-        req_state = self.requests.get(request_id)
-        if req_state is None:
-            return
-
-        info_dict = getattr(req_state, "additional_information_cpu", None)
-        if isinstance(payload_info, dict) and info_dict is not None:
-            info_dict.update(payload_info)
-
     def _update_additional_information(self, scheduler_output: "SchedulerOutput") -> None:
         for new_req in scheduler_output.scheduled_new_reqs:
             payload_info = getattr(new_req, "additional_information", None)

@@ -86,7 +86,6 @@ class Qwen3OmniMoeForConditionalGeneration(
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
         self.have_multimodal_outputs = True
-        self._additional_info_compat_warned: bool = False
         self.has_preprocess = False
         self.has_postprocess = False
         config: Qwen3OmniMoeConfig = vllm_config.model_config.hf_config
@@ -420,15 +419,7 @@ class Qwen3OmniMoeForConditionalGeneration(
                 info_dicts = kwargs.get("runtime_additional_information")
 
             if "runtime_additional_information" in kwargs and "model_intermediate_buffer" not in kwargs:
-                if not self._additional_info_compat_warned:
-                    self._additional_info_compat_warned = True
-                    import warnings
-
-                    warnings.warn(
-                        "runtime_additional_information is deprecated, use model_intermediate_buffer",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
+                logger.warning_once("runtime_additional_information is deprecated, use model_intermediate_buffer")
             code_predictor_codes = [info.get("code_predictor_codes") for info in info_dicts]
             multimodal_outputs = {"code_predictor_codes": torch.cat(code_predictor_codes, dim=0)}
             span_len = multimodal_outputs["code_predictor_codes"].shape[0]

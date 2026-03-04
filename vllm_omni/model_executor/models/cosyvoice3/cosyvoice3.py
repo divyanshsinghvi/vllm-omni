@@ -334,7 +334,7 @@ class CosyVoice3Model(
             logits = torch.cat([logits, pad], dim=-1)
             return logits
         else:
-            raise RuntimeError(f"embed_input_ids is only valid for {self.model_stage}.")
+            raise RuntimeError(f"compute_logits is only valid for {self.model_stage}.")
 
     def embed_multimodal(self, **kwargs: object) -> torch.Tensor:
         if self.model_stage == "talker":

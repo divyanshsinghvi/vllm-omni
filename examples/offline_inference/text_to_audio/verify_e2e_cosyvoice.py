@@ -78,13 +78,7 @@ def run_e2e():
         log_stats=True,
     )
 
-    # Map CosyVoice sampling config into vLLM SamplingParams for stage 0.
-    try:
-        # TODO: This is not working correctly right now.
-        hf_config = omni.instance.stage_list[0].vllm_config.model_config.hf_config
-        sampling_cfg = hf_config.llm["sampling"]
-    except Exception:
-        sampling_cfg = {"top_p": 0.8, "top_k": 25, "eos_token_id": 6561 + 1}
+    sampling_cfg = {"top_p": 0.8, "top_k": 25, "eos_token_id": 6561 + 1}
 
     print("Model initialized. Preparing inputs...")
     if args.audio_path:

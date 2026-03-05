@@ -34,7 +34,7 @@ Add `config.json` in `pretrained_models/Fun-CosyVoice3-0.5B/`:
 
 Run the offline verification script:
 ```
-python examples/offline_inference/text_to_speech/verify_e2e_cosyvoice.py \
+python examples/offline_inference/text_to_audio/verify_e2e_cosyvoice.py \
   --model pretrained_models/Fun-CosyVoice3-0.5B \
   --tokenizer pretrained_models/Fun-CosyVoice3-0.5B/CosyVoice-BlankEN
 ```

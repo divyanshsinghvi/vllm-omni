@@ -20,8 +20,12 @@ from vllm.utils import random_uuid
 
 from vllm_omni.entrypoints.openai.audio_utils_mixin import AudioMixin
 from vllm_omni.entrypoints.openai.protocol.audio import (
+    BatchSpeechRequest,
+    BatchSpeechResponse,
     CreateAudio,
     OpenAICreateSpeechRequest,
+    SpeechBatchItem,
+    SpeechBatchItemResult,
 )
 from vllm_omni.outputs import OmniRequestOutput
 
@@ -475,53 +479,28 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
 
         return params
 
-    async def create_speech(
+    async def _generate_speech_item(
         self,
         request: OpenAICreateSpeechRequest,
-        raw_request: Request | None = None,
-    ):
+        request_id: str,
+        base64_encode: bool = False,
+    ) -> tuple[Any | None, str | None]:
+        """Core non-streaming speech generation pipeline.
+
+        Returns (AudioResponse, None) on success, or (None, error_msg) on failure.
+        The AudioResponse.audio_data is base64-encoded when base64_encode=True.
         """
-        Create Speech API similar to OpenAI's API.
-
-        See https://platform.openai.com/docs/api-reference/audio/createSpeech
-        for the API specification. This API mimics the OpenAI
-        Create Speech API.
-
-        For Qwen3-TTS models, additional parameters are supported:
-        - task_type: "CustomVoice", "VoiceDesign", or "Base"
-        - language: Language code (e.g., "Chinese", "English", "Auto")
-        - voice: Speaker name (e.g., "Vivian", "Ryan") for CustomVoice
-        - instructions: Voice style/emotion instructions
-        - ref_audio: Reference audio for voice cloning (Base task)
-        - ref_text: Transcript of reference audio (Base task)
-        - x_vector_only_mode: Use speaker embedding only (Base task)
-
-        Streaming is supported via stream=True with response_format='pcm'.
-        Each Code2Wav chunk is yielded as raw PCM bytes as soon as it is decoded.
-        """
-        error_check_ret = await self._check_model(request)
-        if error_check_ret is not None:
-            logger.error("Error with model %s", error_check_ret)
-            return error_check_ret
-
-        if self.engine_client.errored:
-            raise self.engine_client.dead_error
-
-        request_id = f"speech-{random_uuid()}"
-
         try:
             if self._is_tts:
-                # Validate TTS parameters
                 validation_error = self._validate_tts_request(request)
                 if validation_error:
-                    return self.create_error_response(validation_error)
+                    return None, validation_error
 
                 tts_params = self._build_tts_params(request)
                 if request.ref_audio is not None:
                     wav_list, sr = await self._resolve_ref_audio(request.ref_audio)
                     tts_params["ref_audio"] = [[wav_list, sr]]
 
-                # Prompt length must match model-side embeddings; values are placeholders.
                 ph_len = self._estimate_prompt_len(tts_params)
                 prompt = {"prompt_token_ids": [1] * ph_len, "additional_information": tts_params}
             else:
@@ -544,30 +523,22 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                 output_modalities=["audio"],
             )
 
-            if request.stream:
-                return StreamingResponse(
-                    self._generate_pcm_chunks(generator, request_id),
-                    media_type="audio/pcm",
-                )
-
-            # Non-streaming: collect final output
             final_output: OmniRequestOutput | None = None
             async for res in generator:
                 final_output = res
 
             if final_output is None:
-                return self.create_error_response("No output generated from the model.")
+                return None, "No output generated from the model."
 
             audio_output, audio_key = self._extract_audio_output(final_output)
             if audio_key is None:
-                return self.create_error_response("TTS model did not produce audio output.")
+                return None, "TTS model did not produce audio output."
 
             audio_tensor = audio_output[audio_key]
             sr_raw = audio_output.get("sr", 24000)
             sr_val = sr_raw[-1] if isinstance(sr_raw, list) and sr_raw else sr_raw
             sample_rate = sr_val.item() if hasattr(sr_val, "item") else int(sr_val)
 
-            # async_chunk mode accumulates chunks as a list; concat first.
             if isinstance(audio_tensor, list):
                 import torch
 
@@ -577,21 +548,174 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             if audio_tensor.ndim > 1:
                 audio_tensor = audio_tensor.squeeze()
 
+            from vllm_omni.entrypoints.openai.protocol.audio import AudioResponse
+
             audio_obj = CreateAudio(
                 audio_tensor=audio_tensor,
                 sample_rate=sample_rate,
                 response_format=request.response_format or "wav",
                 speed=request.speed or 1.0,
                 stream_format=request.stream_format,
-                base64_encode=False,
+                base64_encode=base64_encode,
             )
-            audio_response = self.create_audio(audio_obj)
-            return Response(content=audio_response.audio_data, media_type=audio_response.media_type)
+            audio_response: AudioResponse = self.create_audio(audio_obj)
+            return audio_response, None
 
-        except asyncio.CancelledError:
-            return self.create_error_response("Client disconnected")
         except ValueError as e:
-            return self.create_error_response(e)
+            return None, str(e)
         except Exception as e:
-            logger.exception("Speech generation failed: %s", e)
-            return self.create_error_response(f"Speech generation failed: {e}")
+            logger.exception("Speech generation failed for %s: %s", request_id, e)
+            return None, f"Speech generation failed: {e}"
+
+    async def create_speech(
+        self,
+        request: OpenAICreateSpeechRequest,
+        raw_request: Request | None = None,
+    ):
+        """
+        Create Speech API similar to OpenAI's API.
+
+        See https://platform.openai.com/docs/api-reference/audio/createSpeech
+        for the API specification. This API mimics the OpenAI
+        Create Speech API.
+
+        Streaming is supported via stream=True with response_format='pcm'.
+        """
+        error_check_ret = await self._check_model(request)
+        if error_check_ret is not None:
+            logger.error("Error with model %s", error_check_ret)
+            return error_check_ret
+
+        if self.engine_client.errored:
+            raise self.engine_client.dead_error
+
+        request_id = f"speech-{random_uuid()}"
+
+        # Streaming path stays inline (not part of _generate_speech_item)
+        if request.stream:
+            try:
+                if self._is_tts:
+                    validation_error = self._validate_tts_request(request)
+                    if validation_error:
+                        return self.create_error_response(validation_error)
+
+                    tts_params = self._build_tts_params(request)
+                    if request.ref_audio is not None:
+                        wav_list, sr = await self._resolve_ref_audio(request.ref_audio)
+                        tts_params["ref_audio"] = [[wav_list, sr]]
+
+                    ph_len = self._estimate_prompt_len(tts_params)
+                    prompt = {"prompt_token_ids": [1] * ph_len, "additional_information": tts_params}
+                else:
+                    prompt = {"prompt": request.input}
+
+                sampling_params_list = self.engine_client.default_sampling_params_list
+                generator = self.engine_client.generate(
+                    prompt=prompt,
+                    request_id=request_id,
+                    sampling_params_list=sampling_params_list,
+                    output_modalities=["audio"],
+                )
+                return StreamingResponse(
+                    self._generate_pcm_chunks(generator, request_id),
+                    media_type="audio/pcm",
+                )
+            except asyncio.CancelledError:
+                return self.create_error_response("Client disconnected")
+            except ValueError as e:
+                return self.create_error_response(e)
+            except Exception as e:
+                logger.exception("Speech generation failed: %s", e)
+                return self.create_error_response(f"Speech generation failed: {e}")
+
+        # Non-streaming: delegate to shared helper
+        audio_response, error = await self._generate_speech_item(request, request_id, base64_encode=False)
+        if error is not None:
+            return self.create_error_response(error)
+        return Response(content=audio_response.audio_data, media_type=audio_response.media_type)
+
+    @staticmethod
+    def _merge_batch_item(
+        batch: BatchSpeechRequest,
+        item: SpeechBatchItem,
+    ) -> OpenAICreateSpeechRequest:
+        """Merge batch-level defaults with per-item overrides into a full request."""
+
+        def _pick(field: str):
+            """Return item-level value if set, else batch-level value."""
+            item_val = getattr(item, field, None)
+            return item_val if item_val is not None else getattr(batch, field, None)
+
+        return OpenAICreateSpeechRequest(
+            input=item.input,
+            model=batch.model,
+            voice=_pick("voice"),
+            instructions=_pick("instructions"),
+            response_format=_pick("response_format") or "wav",
+            speed=_pick("speed") or 1.0,
+            stream=False,
+            task_type=_pick("task_type"),
+            language=_pick("language"),
+            ref_audio=_pick("ref_audio"),
+            ref_text=_pick("ref_text"),
+            x_vector_only_mode=_pick("x_vector_only_mode"),
+            max_new_tokens=_pick("max_new_tokens"),
+        )
+
+    async def create_speech_batch(
+        self,
+        batch_request: BatchSpeechRequest,
+    ) -> BatchSpeechResponse:
+        """Generate speech for multiple items concurrently."""
+        # Model check once at batch level
+        error_check_ret = await self._check_model(batch_request)
+        if error_check_ret is not None:
+            raise ValueError(str(error_check_ret))
+
+        if self.engine_client.errored:
+            raise self.engine_client.dead_error
+
+        batch_id = f"speech-batch-{random_uuid()}"
+
+        # Build individual requests
+        merged_requests = [self._merge_batch_item(batch_request, item) for item in batch_request.items]
+
+        # Fan out concurrently
+        async def _run_item(idx: int, req: OpenAICreateSpeechRequest) -> SpeechBatchItemResult:
+            item_request_id = f"{batch_id}-{idx}"
+            audio_response, error = await self._generate_speech_item(
+                req,
+                item_request_id,
+                base64_encode=True,
+            )
+            if error is not None:
+                return SpeechBatchItemResult(index=idx, status="error", error=error)
+            return SpeechBatchItemResult(
+                index=idx,
+                status="success",
+                audio_data=audio_response.audio_data,
+                media_type=audio_response.media_type,
+            )
+
+        results = await asyncio.gather(
+            *[_run_item(i, req) for i, req in enumerate(merged_requests)],
+            return_exceptions=True,
+        )
+
+        # Convert any unexpected exceptions to error results
+        final_results: list[SpeechBatchItemResult] = []
+        for i, r in enumerate(results):
+            if isinstance(r, BaseException):
+                logger.exception("Batch item %d raised unexpected exception: %s", i, r)
+                final_results.append(SpeechBatchItemResult(index=i, status="error", error=str(r)))
+            else:
+                final_results.append(r)
+
+        succeeded = sum(1 for r in final_results if r.status == "success")
+        return BatchSpeechResponse(
+            id=batch_id,
+            results=final_results,
+            total=len(final_results),
+            succeeded=succeeded,
+            failed=len(final_results) - succeeded,
+        )

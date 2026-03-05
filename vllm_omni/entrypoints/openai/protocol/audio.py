@@ -95,3 +95,59 @@ class CreateAudio(BaseModel):
 class AudioResponse(BaseModel):
     audio_data: bytes | str
     media_type: str
+
+
+# --- Batch Speech Models ---
+
+_BATCH_MAX_ITEMS = 32
+
+
+class SpeechBatchItem(BaseModel):
+    """Per-item input for batch speech. Only `input` is required;
+    all other fields override the batch-level defaults when set."""
+
+    input: str
+    voice: str | None = None
+    instructions: str | None = None
+    response_format: Literal["wav", "pcm", "flac", "mp3", "aac", "opus"] | None = None
+    speed: float | None = None
+    task_type: Literal["CustomVoice", "VoiceDesign", "Base"] | None = None
+    language: str | None = None
+    ref_audio: str | None = None
+    ref_text: str | None = None
+    x_vector_only_mode: bool | None = None
+    max_new_tokens: int | None = None
+
+
+class BatchSpeechRequest(BaseModel):
+    """Top-level request for batch speech generation.
+    Fields here act as shared defaults; per-item overrides win."""
+
+    model: str | None = None
+    items: list[SpeechBatchItem] = Field(..., min_length=1, max_length=_BATCH_MAX_ITEMS)
+    voice: str | None = None
+    instructions: str | None = None
+    response_format: Literal["wav", "pcm", "flac", "mp3", "aac", "opus"] = "wav"
+    speed: float | None = Field(default=1.0, ge=0.25, le=4.0)
+    task_type: Literal["CustomVoice", "VoiceDesign", "Base"] | None = None
+    language: str | None = None
+    ref_audio: str | None = None
+    ref_text: str | None = None
+    x_vector_only_mode: bool | None = None
+    max_new_tokens: int | None = None
+
+
+class SpeechBatchItemResult(BaseModel):
+    index: int
+    status: Literal["success", "error"]
+    audio_data: str | None = None
+    media_type: str | None = None
+    error: str | None = None
+
+
+class BatchSpeechResponse(BaseModel):
+    id: str
+    results: list[SpeechBatchItemResult]
+    total: int
+    succeeded: int
+    failed: int

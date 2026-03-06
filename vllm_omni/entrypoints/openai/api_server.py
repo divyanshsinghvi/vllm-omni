@@ -25,6 +25,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 from starlette.datastructures import State
 from starlette.routing import Route
+from vllm import SamplingParams
 from vllm.engine.protocol import EngineClient
 from vllm.entrypoints.anthropic.serving import AnthropicServingMessages
 from vllm.entrypoints.chat_utils import load_chat_template
@@ -34,7 +35,6 @@ from vllm.entrypoints.mcp.tool_server import DemoToolServer, MCPToolServer, Tool
 from vllm.entrypoints.openai.api_server import build_app as build_openai_app
 from vllm.entrypoints.openai.api_server import setup_server as setup_openai_server
 
-from vllm import SamplingParams
 
 # vLLM moved `base` from openai.basic.api_router to serve.instrumentator.basic.
 # Keep a fallback for older/newer upstream layouts during rebase windows.

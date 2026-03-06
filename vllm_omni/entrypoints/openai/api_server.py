@@ -35,7 +35,6 @@ from vllm.entrypoints.mcp.tool_server import DemoToolServer, MCPToolServer, Tool
 from vllm.entrypoints.openai.api_server import build_app as build_openai_app
 from vllm.entrypoints.openai.api_server import setup_server as setup_openai_server
 
-
 # vLLM moved `base` from openai.basic.api_router to serve.instrumentator.basic.
 # Keep a fallback for older/newer upstream layouts during rebase windows.
 try:

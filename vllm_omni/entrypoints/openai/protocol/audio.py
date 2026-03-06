@@ -117,6 +117,7 @@ class SpeechBatchItem(BaseModel):
     ref_text: str | None = None
     x_vector_only_mode: bool | None = None
     max_new_tokens: int | None = None
+    initial_codec_chunk_frames: int | None = None
 
 
 class BatchSpeechRequest(BaseModel):
@@ -135,6 +136,7 @@ class BatchSpeechRequest(BaseModel):
     ref_text: str | None = None
     x_vector_only_mode: bool | None = None
     max_new_tokens: int | None = None
+    initial_codec_chunk_frames: int | None = None
 
 
 class SpeechBatchItemResult(BaseModel):

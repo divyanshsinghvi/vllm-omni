@@ -20,6 +20,7 @@ from vllm.utils import random_uuid
 
 from vllm_omni.entrypoints.openai.audio_utils_mixin import AudioMixin
 from vllm_omni.entrypoints.openai.protocol.audio import (
+    AudioResponse,
     BatchSpeechRequest,
     BatchSpeechResponse,
     CreateAudio,
@@ -492,18 +493,28 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         """
         try:
             if self._is_tts:
+                # Validate TTS parameters
                 validation_error = self._validate_tts_request(request)
                 if validation_error:
                     return None, validation_error
 
+                # Must use prompt_token_ids (not text prompt): the AR Talker
+                # operates on codec tokens; text token IDs exceed codec vocab.
+                # model.preprocess replaces all embeddings, so placeholder value
+                # is irrelevant -- but length must match to avoid excess padding.
                 tts_params = self._build_tts_params(request)
+
                 if request.ref_audio is not None:
                     wav_list, sr = await self._resolve_ref_audio(request.ref_audio)
                     tts_params["ref_audio"] = [[wav_list, sr]]
 
                 ph_len = self._estimate_prompt_len(tts_params)
-                prompt = {"prompt_token_ids": [1] * ph_len, "additional_information": tts_params}
+                prompt = {
+                    "prompt_token_ids": [1] * ph_len,
+                    "additional_information": tts_params,
+                }
             else:
+                # Fallback for unsupported models
                 tts_params = {}
                 prompt = {"prompt": request.input}
 
@@ -530,41 +541,63 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             if final_output is None:
                 return None, "No output generated from the model."
 
-            audio_output, audio_key = self._extract_audio_output(final_output)
-            if audio_key is None:
+            # Extract audio from output
+            # Audio can be in final_output.multimodal_output or final_output.request_output.multimodal_output
+            # Support both "audio" and "model_outputs" keys for compatibility with different models
+            audio_output = None
+            if hasattr(final_output, "multimodal_output") and final_output.multimodal_output:
+                audio_output = final_output.multimodal_output
+            if not audio_output and hasattr(final_output, "request_output"):
+                if final_output.request_output and hasattr(final_output.request_output, "multimodal_output"):
+                    audio_output = final_output.request_output.multimodal_output
+
+            # Check for audio data using either "audio" or "model_outputs" key
+            audio_key = None
+            if audio_output:
+                if "audio" in audio_output:
+                    audio_key = "audio"
+                elif "model_outputs" in audio_output:
+                    audio_key = "model_outputs"
+
+            if not audio_output or audio_key is None:
                 return None, "TTS model did not produce audio output."
 
             audio_tensor = audio_output[audio_key]
-            sr_raw = audio_output.get("sr", 24000)
-            sr_val = sr_raw[-1] if isinstance(sr_raw, list) and sr_raw else sr_raw
-            sample_rate = sr_val.item() if hasattr(sr_val, "item") else int(sr_val)
+            sample_rate = audio_output.get("sr", 24000)
+            if hasattr(sample_rate, "item"):
+                sample_rate = sample_rate.item()
 
+            # Streaming accumulates chunks as a list; concat first.
             if isinstance(audio_tensor, list):
                 import torch
 
                 audio_tensor = torch.cat(audio_tensor, dim=-1)
+            # Convert tensor to numpy
             if hasattr(audio_tensor, "float"):
                 audio_tensor = audio_tensor.float().detach().cpu().numpy()
+
+            # Squeeze batch dimension if present, but preserve channel dimension for stereo
             if audio_tensor.ndim > 1:
                 audio_tensor = audio_tensor.squeeze()
 
-            from vllm_omni.entrypoints.openai.protocol.audio import AudioResponse
-
             audio_obj = CreateAudio(
                 audio_tensor=audio_tensor,
-                sample_rate=sample_rate,
+                sample_rate=int(sample_rate),
                 response_format=request.response_format or "wav",
                 speed=request.speed or 1.0,
                 stream_format=request.stream_format,
                 base64_encode=base64_encode,
             )
+
             audio_response: AudioResponse = self.create_audio(audio_obj)
             return audio_response, None
 
+        except asyncio.CancelledError:
+            return None, "Client disconnected"
         except ValueError as e:
             return None, str(e)
         except Exception as e:
-            logger.exception("Speech generation failed for %s: %s", request_id, e)
+            logger.exception("Speech generation failed: %s", e)
             return None, f"Speech generation failed: {e}"
 
     async def create_speech(
@@ -670,6 +703,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             ref_text=_pick("ref_text"),
             x_vector_only_mode=_pick("x_vector_only_mode"),
             max_new_tokens=_pick("max_new_tokens"),
+            initial_codec_chunk_frames=_pick("initial_codec_chunk_frames"),
         )
 
     async def create_speech_batch(

@@ -579,7 +579,17 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         for the API specification. This API mimics the OpenAI
         Create Speech API.
 
+        For Qwen3-TTS models, additional parameters are supported:
+        - task_type: "CustomVoice", "VoiceDesign", or "Base"
+        - language: Language code (e.g., "Chinese", "English", "Auto")
+        - voice: Speaker name (e.g., "Vivian", "Ryan") for CustomVoice
+        - instructions: Voice style/emotion instructions
+        - ref_audio: Reference audio for voice cloning (Base task)
+        - ref_text: Transcript of reference audio (Base task)
+        - x_vector_only_mode: Use speaker embedding only (Base task)
+
         Streaming is supported via stream=True with response_format='pcm'.
+        Each Code2Wav chunk is yielded as raw PCM bytes as soon as it is decoded.
         """
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:

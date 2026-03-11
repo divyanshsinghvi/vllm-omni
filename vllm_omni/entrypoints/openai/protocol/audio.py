@@ -104,7 +104,7 @@ class AudioResponse(BaseModel):
 
 # --- Batch Speech Models ---
 
-_BATCH_MAX_ITEMS = 32
+BATCH_MAX_ITEMS_DEFAULT = 32
 
 
 class SpeechBatchItem(BaseModel):
@@ -130,7 +130,7 @@ class BatchSpeechRequest(BaseModel):
     Fields here act as shared defaults; per-item overrides win."""
 
     model: str | None = None
-    items: list[SpeechBatchItem] = Field(..., min_length=1, max_length=_BATCH_MAX_ITEMS)
+    items: list[SpeechBatchItem] = Field(..., min_length=1)
     voice: str | None = None
     instructions: str | None = None
     response_format: Literal["wav", "pcm", "flac", "mp3", "aac", "opus"] = "wav"

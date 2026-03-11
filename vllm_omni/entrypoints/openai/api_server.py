@@ -891,6 +891,8 @@ async def create_speech_batch(request: BatchSpeechRequest, raw_request: Request)
     try:
         result = await handler.create_speech_batch(request)
         return JSONResponse(content=result.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST.value, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=str(e)) from e
 

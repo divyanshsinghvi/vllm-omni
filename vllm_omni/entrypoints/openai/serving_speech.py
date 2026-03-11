@@ -20,6 +20,7 @@ from vllm.utils import random_uuid
 
 from vllm_omni.entrypoints.openai.audio_utils_mixin import AudioMixin
 from vllm_omni.entrypoints.openai.protocol.audio import (
+    BATCH_MAX_ITEMS_DEFAULT,
     AudioResponse,
     BatchSpeechRequest,
     BatchSpeechResponse,
@@ -80,6 +81,10 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         self.supported_speakers = self._load_supported_speakers()
         logger.info(f"Loaded {len(self.supported_speakers)} supported speakers: {sorted(self.supported_speakers)}")
         self._tts_tokenizer = None
+
+        # Batch max items: configurable via engine_client attribute, else default
+        _batch_override = getattr(self.engine_client, "tts_batch_max_items", None)
+        self._batch_max_items: int = _batch_override if isinstance(_batch_override, int) else BATCH_MAX_ITEMS_DEFAULT
 
         # Load speech tokenizer codec parameters for prompt length estimation
         self._codec_frame_rate: float | None = self._load_codec_frame_rate()
@@ -686,6 +691,11 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         batch_request: BatchSpeechRequest,
     ) -> BatchSpeechResponse:
         """Generate speech for multiple items concurrently."""
+        if len(batch_request.items) > self._batch_max_items:
+            raise ValueError(
+                f"Batch contains {len(batch_request.items)} items, exceeding the maximum of {self._batch_max_items}."
+            )
+
         # Model check once at batch level
         error_check_ret = await self._check_model(batch_request)
         if error_check_ret is not None:

@@ -264,6 +264,7 @@ class OmniBase:
 
         # TTS-specific CLI overrides
         self.tts_max_instructions_length: int | None = kwargs.get("tts_max_instructions_length", None)
+        self.tts_batch_max_items: int | None = kwargs.get("tts_batch_max_items", None)
 
         # Load stage configurations from YAML
         config_path, stage_configs = load_and_resolve_stage_configs(

@@ -11,7 +11,12 @@ from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
 from vllm_omni.entrypoints.openai.audio_utils_mixin import AudioMixin
-from vllm_omni.entrypoints.openai.protocol.audio import CreateAudio, OpenAICreateSpeechRequest
+from vllm_omni.entrypoints.openai.protocol.audio import (
+    BatchSpeechRequest,
+    CreateAudio,
+    OpenAICreateSpeechRequest,
+    SpeechBatchItem,
+)
 from vllm_omni.entrypoints.openai.serving_speech import (
     OmniOpenAIServingSpeech,
 )
@@ -209,6 +214,7 @@ def test_app(mocker: MockerFixture):
         return {"voices": speakers}
 
     app.add_api_route("/v1/audio/voices", list_voices, methods=["GET"])
+    app.add_api_route("/v1/audio/speech/batch", speech_server.create_speech_batch, methods=["POST"])
 
     return app
 
@@ -649,3 +655,136 @@ class TestStreamingResponse:
         response = client.post("/v1/audio/speech", json={"input": "Hello", "response_format": "wav"})
         assert response.status_code == 200
         assert "audio/wav" in response.headers["content-type"]
+
+
+class TestSpeechBatchAPI:
+    """Tests for the /v1/audio/speech/batch endpoint."""
+
+    def test_batch_success(self, client):
+        """Batch with two items should return two successful results with base64 audio."""
+        payload = {
+            "items": [
+                {"input": "Hello world"},
+                {"input": "Goodbye world"},
+            ],
+            "response_format": "wav",
+        }
+        response = client.post("/v1/audio/speech/batch", json=payload)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 2
+        assert body["succeeded"] == 2
+        assert body["failed"] == 0
+        assert all(r["status"] == "success" for r in body["results"])
+        assert all(r["audio_data"] is not None for r in body["results"])
+        # Verify audio_data is valid base64
+        import base64
+
+        for r in body["results"]:
+            decoded = base64.b64decode(r["audio_data"])
+            assert len(decoded) > 0
+
+    def test_batch_single_item(self, client):
+        """Batch with a single item should work."""
+        payload = {"items": [{"input": "Solo"}]}
+        response = client.post("/v1/audio/speech/batch", json=payload)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 1
+        assert body["succeeded"] == 1
+
+    def test_batch_empty_items_rejected(self, client):
+        """Empty items list should be rejected by Pydantic validation."""
+        response = client.post("/v1/audio/speech/batch", json={"items": []})
+        assert response.status_code == 422
+
+    def test_batch_too_many_items(self, client):
+        """Exceeding the batch max items limit (default 32) should be rejected."""
+        payload = {"items": [{"input": f"text {i}"} for i in range(33)]}
+        with pytest.raises(ValueError, match="exceeding the maximum"):
+            client.post("/v1/audio/speech/batch", json=payload)
+
+    def test_batch_max_items_allowed(self, client):
+        """Exactly 32 items should be accepted."""
+        payload = {"items": [{"input": f"text {i}"} for i in range(32)]}
+        response = client.post("/v1/audio/speech/batch", json=payload)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 32
+        assert body["succeeded"] == 32
+
+    def test_batch_results_have_correct_indices(self, client):
+        """Each result should have an index matching its position."""
+        payload = {"items": [{"input": f"text {i}"} for i in range(3)]}
+        response = client.post("/v1/audio/speech/batch", json=payload)
+        body = response.json()
+        indices = [r["index"] for r in body["results"]]
+        assert indices == [0, 1, 2]
+
+    def test_batch_response_has_id(self, client):
+        """Batch response should have a unique id starting with 'speech-batch-'."""
+        payload = {"items": [{"input": "Hello"}]}
+        response = client.post("/v1/audio/speech/batch", json=payload)
+        body = response.json()
+        assert body["id"].startswith("speech-batch-")
+
+
+class TestMergeBatchItem:
+    """Tests for the _merge_batch_item static method."""
+
+    def test_item_override_wins(self):
+        """Per-item voice should override batch-level voice."""
+        batch = BatchSpeechRequest(
+            items=[SpeechBatchItem(input="hi", voice="Ryan")],
+            voice="Vivian",
+        )
+        merged = OmniOpenAIServingSpeech._merge_batch_item(batch, batch.items[0])
+        assert merged.voice == "Ryan"
+
+    def test_batch_default_used(self):
+        """Batch-level voice should be used when item doesn't specify one."""
+        batch = BatchSpeechRequest(
+            items=[SpeechBatchItem(input="hi")],
+            voice="Vivian",
+        )
+        merged = OmniOpenAIServingSpeech._merge_batch_item(batch, batch.items[0])
+        assert merged.voice == "Vivian"
+
+    def test_response_format_override(self):
+        """Per-item response_format should override batch default."""
+        batch = BatchSpeechRequest(
+            items=[SpeechBatchItem(input="hi", response_format="mp3")],
+            response_format="wav",
+        )
+        merged = OmniOpenAIServingSpeech._merge_batch_item(batch, batch.items[0])
+        assert merged.response_format == "mp3"
+
+    def test_stream_always_false(self):
+        """Merged requests should always have stream=False."""
+        batch = BatchSpeechRequest(items=[SpeechBatchItem(input="hi")])
+        merged = OmniOpenAIServingSpeech._merge_batch_item(batch, batch.items[0])
+        assert merged.stream is False
+
+    def test_all_fields_merge(self):
+        """All overridable fields should merge correctly."""
+        batch = BatchSpeechRequest(
+            items=[
+                SpeechBatchItem(
+                    input="hello",
+                    voice="Ryan",
+                    language="English",
+                    speed=1.5,
+                    task_type="CustomVoice",
+                    max_new_tokens=512,
+                )
+            ],
+            voice="Vivian",
+            language="Chinese",
+            speed=1.0,
+        )
+        merged = OmniOpenAIServingSpeech._merge_batch_item(batch, batch.items[0])
+        assert merged.voice == "Ryan"
+        assert merged.language == "English"
+        assert merged.speed == 1.5
+        assert merged.task_type == "CustomVoice"
+        assert merged.max_new_tokens == 512

@@ -12,6 +12,7 @@ import numpy as np
 from fastapi import Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from transformers.utils.hub import cached_file
+from vllm.entrypoints.openai.engine.protocol import ErrorResponse
 from vllm.entrypoints.openai.engine.serving import OpenAIServing
 from vllm.logger import init_logger
 from vllm.multimodal.media import MediaConnector
@@ -807,7 +808,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                 audio_tensor=audio_tensor,
                 sample_rate=sample_rate,
                 response_format=request.response_format or "wav",
-                speed=request.speed or 1.0,
+                speed=request.speed if request.speed is not None else 1.0,
                 stream_format=request.stream_format,
                 base64_encode=base64_encode,
             )
@@ -911,13 +912,14 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             item_val = getattr(item, field, None)
             return item_val if item_val is not None else getattr(batch, field, None)
 
+        picked_speed = _pick("speed")
         return OpenAICreateSpeechRequest(
             input=item.input,
             model=batch.model,
             voice=_pick("voice"),
             instructions=_pick("instructions"),
             response_format=_pick("response_format") or "wav",
-            speed=_pick("speed") or 1.0,
+            speed=picked_speed if picked_speed is not None else 1.0,
             stream=False,
             task_type=_pick("task_type"),
             language=_pick("language"),
@@ -931,7 +933,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
     async def create_speech_batch(
         self,
         batch_request: BatchSpeechRequest,
-    ) -> BatchSpeechResponse:
+    ) -> BatchSpeechResponse | ErrorResponse:
         """Generate speech for multiple items concurrently."""
         if len(batch_request.items) > self._batch_max_items:
             raise ValueError(
@@ -940,7 +942,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
 
         error_check_ret = await self._check_model(batch_request)
         if error_check_ret is not None:
-            raise ValueError(str(error_check_ret))
+            return error_check_ret
 
         if self.engine_client.errored:
             raise self.engine_client.dead_error

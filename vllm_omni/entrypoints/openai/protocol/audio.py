@@ -115,7 +115,7 @@ class SpeechBatchItem(BaseModel):
     voice: str | None = None
     instructions: str | None = None
     response_format: Literal["wav", "pcm", "flac", "mp3", "aac", "opus"] | None = None
-    speed: float | None = None
+    speed: float | None = Field(default=None, ge=0.25, le=4.0)
     task_type: Literal["CustomVoice", "VoiceDesign", "Base"] | None = None
     language: str | None = None
     ref_audio: str | None = None

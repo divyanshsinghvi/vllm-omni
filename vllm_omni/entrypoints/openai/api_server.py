@@ -898,6 +898,11 @@ async def create_speech_batch(request: BatchSpeechRequest, raw_request: Request)
         return base_server.create_error_response(message="The model does not support Speech API")
     try:
         result = await handler.create_speech_batch(request)
+        if isinstance(result, ErrorResponse):
+            return JSONResponse(
+                content=result.model_dump(),
+                status_code=result.error.code if result.error else 400,
+            )
         return JSONResponse(content=result.model_dump())
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST.value, detail=str(e)) from e

@@ -105,7 +105,6 @@ class AudioResponse(BaseModel):
 # --- Batch Speech Models ---
 
 BATCH_MAX_ITEMS_DEFAULT = 32
-BATCH_CONCURRENCY_DEFAULT = 8
 
 
 class SpeechBatchItem(BaseModel):

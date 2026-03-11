@@ -282,6 +282,24 @@ curl -X POST http://localhost:8091/v1/audio/speech/batch \
     }'
 ```
 
+**Voice cloning with shared reference audio (Base task):**
+
+```bash
+curl -X POST http://localhost:8091/v1/audio/speech/batch \
+    -H "Content-Type: application/json" \
+    -d '{
+        "items": [
+            {"input": "First sentence in the cloned voice."},
+            {"input": "Second sentence in the cloned voice."}
+        ],
+        "task_type": "Base",
+        "ref_audio": "https://example.com/reference.wav",
+        "ref_text": "Transcript of the reference audio"
+    }'
+```
+
+Setting `ref_audio` at the batch level applies it to all items, avoiding the need to repeat it per item.
+
 **Decoding the response in Python:**
 
 ```python
@@ -309,14 +327,21 @@ for result in response.json()["results"]:
 
 ### Configuration
 
-The batch endpoint has two configurable limits, passed as engine kwargs:
+| Parameter | Source | Default | Description |
+|-----------|--------|---------|-------------|
+| `tts_batch_max_items` | engine kwarg | 32 | Maximum number of items per batch request |
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `tts_batch_max_items` | 32 | Maximum number of items per batch request |
-| `tts_batch_concurrency` | 8 | Maximum items synthesized concurrently within a batch |
+All items are fanned out to `generate()` concurrently. The engine's stage worker automatically batches them up to the configured `max_batch_size` and queues the rest — no client-side throttling needed.
 
-Items beyond the concurrency limit are queued and processed as in-flight items complete.
+For best throughput, use a batch-optimized stage config with `max_batch_size > 1`:
+
+```bash
+vllm serve Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice \
+    --stage-configs-path vllm_omni/model_executor/stage_configs/qwen3_tts_batch.yaml \
+    --omni --port 8091 --trust-remote-code --enforce-eager
+```
+
+The default `qwen3_tts.yaml` uses `max_batch_size: 1` (single request). The `qwen3_tts_batch.yaml` config sets `max_batch_size: 4` for ~4x throughput.
 
 ## Supported Models
 

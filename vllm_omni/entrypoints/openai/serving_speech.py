@@ -20,7 +20,6 @@ from vllm.utils import random_uuid
 
 from vllm_omni.entrypoints.openai.audio_utils_mixin import AudioMixin
 from vllm_omni.entrypoints.openai.protocol.audio import (
-    BATCH_CONCURRENCY_DEFAULT,
     BATCH_MAX_ITEMS_DEFAULT,
     AudioResponse,
     BatchSpeechRequest,
@@ -83,13 +82,9 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         logger.info(f"Loaded {len(self.supported_speakers)} supported speakers: {sorted(self.supported_speakers)}")
         self._tts_tokenizer = None
 
-        # Batch configuration: max items and concurrency limit
+        # Batch configuration
         _batch_override = getattr(self.engine_client, "tts_batch_max_items", None)
         self._batch_max_items: int = _batch_override if isinstance(_batch_override, int) else BATCH_MAX_ITEMS_DEFAULT
-        _concurrency_override = getattr(self.engine_client, "tts_batch_concurrency", None)
-        self._batch_concurrency: int = (
-            _concurrency_override if isinstance(_concurrency_override, int) else BATCH_CONCURRENCY_DEFAULT
-        )
 
         # Load speech tokenizer codec parameters for prompt length estimation
         self._codec_frame_rate: float | None = self._load_codec_frame_rate()
@@ -656,7 +651,6 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                 logger.exception("Speech generation failed: %s", e)
                 return self.create_error_response(f"Speech generation failed: {e}")
 
-        # Non-streaming: delegate to shared helper
         audio_response, error = await self._generate_speech_item(request, request_id, base64_encode=False)
         if error is not None:
             return self.create_error_response(error)
@@ -701,7 +695,6 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                 f"Batch contains {len(batch_request.items)} items, exceeding the maximum of {self._batch_max_items}."
             )
 
-        # Model check once at batch level
         error_check_ret = await self._check_model(batch_request)
         if error_check_ret is not None:
             raise ValueError(str(error_check_ret))
@@ -711,35 +704,29 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
 
         batch_id = f"speech-batch-{random_uuid()}"
 
-        # Build individual requests
         merged_requests = [self._merge_batch_item(batch_request, item) for item in batch_request.items]
 
-        # Fan out with bounded concurrency to avoid overloading the engine
-        sem = asyncio.Semaphore(self._batch_concurrency)
-
         async def _run_item(idx: int, req: OpenAICreateSpeechRequest) -> SpeechBatchItemResult:
-            async with sem:
-                item_request_id = f"{batch_id}-{idx}"
-                audio_response, error = await self._generate_speech_item(
-                    req,
-                    item_request_id,
-                    base64_encode=True,
-                )
-                if error is not None:
-                    return SpeechBatchItemResult(index=idx, status="error", error=error)
-                return SpeechBatchItemResult(
-                    index=idx,
-                    status="success",
-                    audio_data=audio_response.audio_data,
-                    media_type=audio_response.media_type,
-                )
+            item_request_id = f"{batch_id}-{idx}"
+            audio_response, error = await self._generate_speech_item(
+                req,
+                item_request_id,
+                base64_encode=True,
+            )
+            if error is not None:
+                return SpeechBatchItemResult(index=idx, status="error", error=error)
+            return SpeechBatchItemResult(
+                index=idx,
+                status="success",
+                audio_data=audio_response.audio_data,
+                media_type=audio_response.media_type,
+            )
 
         results = await asyncio.gather(
             *[_run_item(i, req) for i, req in enumerate(merged_requests)],
             return_exceptions=True,
         )
 
-        # Convert any unexpected exceptions to error results
         final_results: list[SpeechBatchItemResult] = []
         for i, r in enumerate(results):
             if isinstance(r, BaseException):

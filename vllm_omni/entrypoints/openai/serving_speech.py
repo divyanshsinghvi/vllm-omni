@@ -21,7 +21,6 @@ from vllm.utils import random_uuid
 from vllm_omni.entrypoints.openai.audio_utils_mixin import AudioMixin
 from vllm_omni.entrypoints.openai.metadata_manager import MetadataManager
 from vllm_omni.entrypoints.openai.protocol.audio import (
-    BATCH_MAX_ITEMS_DEFAULT,
     AudioResponse,
     BatchSpeechRequest,
     BatchSpeechResponse,
@@ -121,8 +120,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         logger.info(f"Loaded {len(self.uploaded_speakers)} uploaded speakers")
 
         # Batch configuration
-        _batch_override = getattr(self.engine_client, "tts_batch_max_items", None)
-        self._batch_max_items: int = _batch_override if isinstance(_batch_override, int) else BATCH_MAX_ITEMS_DEFAULT
+        self._batch_max_items: int = self.engine_client.tts_batch_max_items
 
         # Load speech tokenizer codec parameters for prompt length estimation
         self._codec_frame_rate: float | None = self._load_codec_frame_rate()

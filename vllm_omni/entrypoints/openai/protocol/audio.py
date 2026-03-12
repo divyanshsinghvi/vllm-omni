@@ -104,8 +104,6 @@ class AudioResponse(BaseModel):
 
 # --- Batch Speech Models ---
 
-BATCH_MAX_ITEMS_DEFAULT = 32
-
 
 class SpeechBatchItem(BaseModel):
     """Per-item input for batch speech. Only `input` is required;

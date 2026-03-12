@@ -15,7 +15,9 @@ from pathlib import Path
 import pytest
 import torch
 
+from tests.utils import hardware_test
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams
+from vllm_omni.platforms import current_omni_platform
 
 # ruff: noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -31,6 +33,10 @@ os.environ["VLLM_TEST_CLEAN_GPU_MEMORY"] = "1"
 models = ["riverclouds/qwen_image_random"]
 
 
+@pytest.mark.core_model
+@pytest.mark.diffusion
+@pytest.mark.cache
+@hardware_test(res={"cuda": "L4", "rocm": "MI325"})
 @pytest.mark.parametrize("model_name", models)
 def test_teacache(model_name: str):
     """Test TeaCache backend with diffusion model."""
@@ -58,7 +64,7 @@ def test_teacache(model_name: str):
                 width=width,
                 num_inference_steps=num_inference_steps,
                 guidance_scale=0.0,
-                generator=torch.Generator("cuda").manual_seed(42),
+                generator=torch.Generator(current_omni_platform.device_type).manual_seed(42),
                 num_outputs_per_prompt=1,  # Single output for speed
             ),
         )

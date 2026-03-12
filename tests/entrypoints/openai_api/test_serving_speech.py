@@ -186,6 +186,7 @@ def test_app(mocker: MockerFixture):
 
     mock_engine_client.generate = mocker.MagicMock(side_effect=mock_generate_fn)
     mock_engine_client.default_sampling_params_list = [{}]
+    mock_engine_client.tts_batch_max_items = 32
 
     # Mock models to have an is_base_model method
     mock_models = mocker.MagicMock()

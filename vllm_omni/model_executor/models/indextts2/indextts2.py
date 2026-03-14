@@ -13,11 +13,13 @@ from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import MultiModalFieldConfig, MultiModalKwargsItems
 from vllm.multimodal.parse import MultiModalDataItems, MultiModalDataParser
 from vllm.multimodal.processing import (
+    BaseDummyInputsBuilder,
     BaseMultiModalProcessor,
     BaseProcessingInfo,
+    ProcessorInputs,
     PromptUpdate,
 )
-from vllm.multimodal.profiling import BaseDummyInputsBuilder, ProcessorInputs
+from vllm.renderers.registry import RENDERER_REGISTRY
 from vllm.sequence import IntermediateTensors
 from vllm.tokenizers import TokenizerRegistry
 
@@ -32,6 +34,13 @@ TokenizerRegistry.register(
     class_name="IndexTTS2Tokenizer",
 )
 
+# Register indextts2 renderer (reuses the HF renderer)
+RENDERER_REGISTRY.register(
+    "indextts2",
+    module="vllm.renderers.hf",
+    class_name="HfRenderer",
+)
+
 
 class IndexTTS2ProcessingInfo(BaseProcessingInfo):
     def get_hf_config(self):
@@ -39,6 +48,9 @@ class IndexTTS2ProcessingInfo(BaseProcessingInfo):
 
     def get_supported_mm_limits(self) -> Mapping[str, int | None]:
         return {"audio": None}
+
+    def get_data_parser(self) -> MultiModalDataParser:
+        return MultiModalDataParser(target_sr=22050)
 
 
 class IndexTTS2Processor(BaseMultiModalProcessor[IndexTTS2ProcessingInfo]):
@@ -88,9 +100,6 @@ class IndexTTS2Processor(BaseMultiModalProcessor[IndexTTS2ProcessingInfo]):
     ) -> Sequence[PromptUpdate]:
         return []
 
-    def _get_data_parser(self) -> MultiModalDataParser:
-        return MultiModalDataParser(target_sr=22050)
-
 
 class IndexTTS2DummyInputsBuilder(BaseDummyInputsBuilder[IndexTTS2ProcessingInfo]):
     def get_dummy_text(self, mm_counts: Mapping[str, int]) -> str:
@@ -112,8 +121,7 @@ class IndexTTS2DummyInputsBuilder(BaseDummyInputsBuilder[IndexTTS2ProcessingInfo
     ) -> ProcessorInputs:
         return ProcessorInputs(
             prompt=self.get_dummy_text(mm_counts),
-            mm_data={},
-            hf_processor_mm_kwargs={},
+            mm_data_items=MultiModalDataItems({}),
         )
 
 
@@ -204,13 +212,22 @@ class IndexTTS2Model(nn.Module):
                 feat = feat - feat.mean(dim=0, keepdim=True)
                 style = self.campplus_model(feat.unsqueeze(0))
             else:
-                # Dummy for profile run
-                spk_cond_emb = torch.zeros(
-                    1, 100, self.cfg.semantic_codec["hidden_size"], device=target_device, dtype=target_dtype
+                # Dummy/profile run — no audio available, return placeholder output
+                model_dim = self.cfg.gpt["model_dim"]
+                return OmniOutput(
+                    text_hidden_states=torch.zeros(1, 1, model_dim, device=target_device, dtype=target_dtype),
+                    multimodal_outputs={
+                        "latent": torch.zeros(1, 1, model_dim, device=target_device, dtype=target_dtype),
+                        "speech_conditioning_latent": torch.zeros(
+                            1, 1, model_dim, device=target_device, dtype=target_dtype
+                        ),
+                        "codes": torch.zeros(1, 1, device=target_device, dtype=torch.long),
+                        "code_lens": torch.tensor([1], device=target_device),
+                        "S_ref": torch.zeros(8, 1, 1, device=target_device, dtype=torch.long),
+                        "ref_mel": torch.zeros(1, 80, 1, device=target_device, dtype=target_dtype),
+                        "style": torch.zeros(1, 192, device=target_device, dtype=target_dtype),
+                    },
                 )
-                S_ref = torch.zeros(1, 8, 100, device=target_device, dtype=torch.long)
-                ref_mel = torch.zeros(1, 80, 100, device=target_device, dtype=target_dtype)
-                style = torch.zeros(1, 192, device=target_device, dtype=target_dtype)
 
             if emo_audio_path and os.path.exists(emo_audio_path):
                 emo_audio, emo_sr = torchaudio.load(emo_audio_path)
@@ -263,7 +280,7 @@ class IndexTTS2Model(nn.Module):
                     },
                 )
 
-            self.talker.inference_model.eval().to(dtype=target_dtype)
+            self.talker.inference_model.eval().float()  # GPT2 LayerNorm requires float32
 
             if input_ids.dim() == 1:
                 input_ids = input_ids.unsqueeze(0)
@@ -314,8 +331,7 @@ class IndexTTS2Model(nn.Module):
                 use_speed=use_speed,
             )
 
-            # S_ref from quantize is [B, N, T], transpose to [N, B, T] for vq2emb
-            S_ref = S_ref.permute(1, 0, 2)
+            # S_ref from RepCodec.quantize() is [B, T, D] continuous embeddings
 
             multimodal_outputs = {
                 "latent": latent,
@@ -357,15 +373,15 @@ class IndexTTS2Model(nn.Module):
             latent = latent.to(device=target_device, dtype=target_dtype)
             codes = codes.to(device=target_device).long()
             code_lens = code_lens.to(device=target_device).long()
-            S_ref = S_ref.to(device=target_device).long()
+            S_ref = S_ref.to(device=target_device, dtype=target_dtype)
             ref_mel = ref_mel.to(device=target_device, dtype=target_dtype)
             style = style.to(device=target_device, dtype=target_dtype)
 
             ref_target_lengths = torch.LongTensor([ref_mel.size(-1)]).to(target_device)
-            S_ref_emb = self.semantic_codec.quantizer.vq2emb(S_ref.long(), n_quantizers=3)
-            S_ref_emb = S_ref_emb.transpose(1, 2)
+            self.semantic_codec = self.semantic_codec.to(target_device).float()
+            # S_ref is continuous embeddings [B, T, D] from RepCodec.quantize(), pass directly
             prompt_condition = self.s2mel.models["length_regulator"](
-                S_ref_emb, ylens=ref_target_lengths, n_quantizers=3, f0=None
+                S_ref, ylens=ref_target_lengths, n_quantizers=3, f0=None
             )[0]
 
             latent = self.s2mel.models["gpt_layer"](latent)

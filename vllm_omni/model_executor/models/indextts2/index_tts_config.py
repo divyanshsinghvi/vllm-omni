@@ -7,19 +7,20 @@ class IndexTTS2Config(PretrainedConfig):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.num_attention_heads = 20
-        # dataset:
-        #     bpe_model: bpe.model
-        #     sample_rate: 24000
-        #     squeeze: false
-        #     mel:
-        #         sample_rate: 24000
-        #         n_fft: 1024
-        #         hop_length: 256
-        #         win_length: 1024
-        #         n_mels: 100
-        #         mel_fmin: 0
-        #         normalize: false
-        # self.tokenizer_path = "pretrained_model/IndexTTS2/"
+        self.dataset = {
+            "bpe_model": "bpe.model",
+            "sample_rate": 24000,
+            "squeeze": False,
+            "mel": {
+                "sample_rate": 24000,
+                "n_fft": 1024,
+                "hop_length": 256,
+                "win_length": 1024,
+                "n_mels": 100,
+                "mel_fmin": 0,
+                "normalize": False,
+            },
+        }
         self.hidden_size = 1280
         self.gpt = {
             "model_dim": self.hidden_size,

@@ -1,9 +1,5 @@
-# IndexTTS GPT Stage (Stage 0): Text → Semantic Codes
-# Index TTS S2Mel Stage (Stage 1): Converts semantic codes to mel-spectrograms.
-# IndexTTS Stage 2: Vocoder - Mel-Spectrogram to Waveform
-
 stage_args:
-  - stage_id: 0 # Preprocessor Stage
+  - stage_id: 0
     runtime:
       devices: 0
       max_batch_size: 1
@@ -11,25 +7,20 @@ stage_args:
       model_stage: gpt
       worker_cls: vllm_omni.worker.gpu_generation_worker.GPUGenerationWorker
       scheduler_cls: vllm_omni.core.sched.omni_generation_scheduler.OmniGenerationScheduler
-      # worker_cls: vllm_omni.worker.gpu_ar_worker.GPUARWorker
-      # scheduler_cls: vllm_omni.core.sched.omni_ar_scheduler.OmniARScheduler
       model_arch: IndexTTS2Model
       trust_remote_code: true
-      config_format: indextts2_yaml
-      stage_configs_path: vllm_omni/model_executor/stage_configs/indextts2.yaml
-      tokenizer_mode: indextts2
-      tokenizer: pretrained_models/IndexTTS2
+      tokenizer_mode: auto
+      tokenizer: pretrained_models/IndexTTS2/qwen0.6bemo4-merge
       gpu_memory_utilization: 0.1
       enable_prefix_caching: false
       disable_hybrid_kv_cache_manager: true
       enforce_eager: true
-      engine_output_type: latent  # Output semantic codes
-      dtype: "float16"
-      quantization: "fp8"
+      engine_output_type: latent
+      dtype: "float32"
       skip_mm_profiling: true
       mm_processor_cache_gb: 0
       max_num_seqs: 1
-      runner: "generate"  # Explicitly mark as generative model
+      runner: "generate"
   - stage_id: 1
     runtime:
       devices: 0
@@ -40,13 +31,11 @@ stage_args:
       scheduler_cls: vllm_omni.core.sched.omni_generation_scheduler.OmniGenerationScheduler
       model_arch: IndexTTS2Model
       trust_remote_code: true
-      config_format: indextts2_yaml
-      stage_configs_path: vllm_omni/model_executor/stage_configs/indextts2.yaml
-      tokenizer_mode: indextts2
-      tokenizer: pretrained_models/IndexTTS2
+      tokenizer_mode: auto
+      tokenizer: pretrained_models/IndexTTS2/qwen0.6bemo4-merge
       gpu_memory_utilization: 0.1
-      runner: "generate"  # Explicitly mark as generative model
-      dtype: "float32"  # s2mel must be float32 (not float16) - matching original infer_v2
+      runner: "generate"
+      dtype: "float32"
       skip_mm_profiling: true
       mm_processor_cache_gb: 0
       enable_prefix_caching: false

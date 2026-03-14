@@ -17,6 +17,7 @@ def _register_omni_hf_configs() -> None:
         from transformers import AutoConfig
 
         from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
+        from vllm_omni.model_executor.models.indextts2.index_tts_config import IndexTTS2Config
         from vllm_omni.model_executor.models.qwen3_tts.configuration_qwen3_tts import (
             Qwen3TTSConfig,
         )
@@ -27,6 +28,7 @@ def _register_omni_hf_configs() -> None:
     try:
         AutoConfig.register("qwen3_tts", Qwen3TTSConfig)
         AutoConfig.register("cosyvoice3", CosyVoice3Config)
+        AutoConfig.register("indextts2", IndexTTS2Config)
     except ValueError:
         # Already registered elsewhere; ignore.
         return

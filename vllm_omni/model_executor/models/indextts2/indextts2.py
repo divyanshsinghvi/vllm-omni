@@ -529,7 +529,7 @@ class IndexTTS2Model(nn.Module):
             safetensors.torch.load_model(semantic_codec, semantic_code_ckpt)
             self.semantic_codec = semantic_codec.to(self.device).eval()
 
-            from vllm_omni.model_executor.models.indextts2.s2mel.modules.bigvgan import bigvgan as bigvgan_module
+            import bigvgan as bigvgan_module
 
             bigvgan_name = self.cfg.vocoder["name"]
             self.bigvgan = bigvgan_module.BigVGAN.from_pretrained(bigvgan_name, use_cuda_kernel=False)

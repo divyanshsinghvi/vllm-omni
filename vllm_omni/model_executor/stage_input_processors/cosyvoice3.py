@@ -2,6 +2,7 @@ from typing import Any
 
 from vllm.inputs import TextPrompt
 
+from vllm_omni.data_entry_keys import flatten_payload
 from vllm_omni.inputs.data import OmniTokensPrompt
 
 
@@ -27,6 +28,6 @@ def text2flow(
 
     output_ids = output.token_ids
     prefix_ids = source_output.prompt_token_ids
-    multi_modal_data["ids.prompt"] = prefix_ids
+    multi_modal_data.update(flatten_payload({"ids": {"prompt": prefix_ids}}))
     engine_input = OmniTokensPrompt(prompt_token_ids=output_ids, additional_information=multi_modal_data)
     return [engine_input]

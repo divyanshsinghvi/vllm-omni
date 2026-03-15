@@ -46,6 +46,7 @@ from vllm.transformers_utils.config import (
     set_default_rope_theta,
 )
 
+from vllm_omni.data_entry_keys import unflatten_payload
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 from vllm_omni.model_executor.models.utils import add_prefix_to_loaded_weights
 from vllm_omni.transformers_utils.configs.mammoth_moda2 import Mammothmoda2Config
@@ -608,17 +609,19 @@ class MammothModa2ARForConditionalGeneration(Qwen2_5_VLForConditionalGeneration)
         num_reqs = int(logits.shape[0])
         for i in range(num_reqs):
             runtime_info = runtime_infos[i] if isinstance(runtime_infos[i], dict) else {}
-            omni_task = runtime_info.get("meta.omni_task")
+            payload = unflatten_payload(runtime_info)
+            meta = payload.get("meta", {})
+            omni_task = meta.get("omni_task")
             if not isinstance(omni_task, list) or not omni_task or omni_task[0] != "t2i":
                 # Text/understanding/chat: forbid sampling from the extra gen vocab.
                 logits[i, self.language_model.base_vocab_size :] = neg_inf
                 continue
 
-            ar_width = runtime_info["meta.ar_width"][0]
-            eol_token_id = runtime_info["meta.eol_token_id"][0]
-            visual_start = runtime_info["meta.visual_token_start_id"][0]
-            visual_end = runtime_info["meta.visual_token_end_id"][0]
-            generated_len = runtime_info["meta.generated_len"]
+            ar_width = meta["ar_width"][0]
+            eol_token_id = meta["eol_token_id"][0]
+            visual_start = meta["visual_token_start_id"][0]
+            visual_end = meta["visual_token_end_id"][0]
+            generated_len = meta["generated_len"]
 
             row = logits[i]
             column_id = generated_len % (ar_width + 1)

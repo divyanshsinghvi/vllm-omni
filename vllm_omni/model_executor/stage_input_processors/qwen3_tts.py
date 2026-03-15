@@ -5,6 +5,7 @@ from typing import Any
 import torch
 from vllm.logger import init_logger
 
+from vllm_omni.data_entry_keys import flatten_payload, unflatten_payload
 from vllm_omni.model_executor.stage_input_processors.chunk_size_utils import (
     compute_dynamic_initial_chunk_size,
     max_ic_for_chunk_size,
@@ -27,12 +28,14 @@ def talker2code2wav(
     code2wav_inputs: list[OmniTokensPrompt] = []
     for talker_output in talker_outputs:
         output = talker_output.outputs[0]
+        mm = unflatten_payload(output.multimodal_output)
+        mm_codes = mm.get("codes", {})
         # audio_codes shape: [num_frames, Q] where Q=num_quantizers (16)
-        audio_codes = output.multimodal_output["codes.audio"].to(torch.long)
+        audio_codes = mm_codes["audio"].to(torch.long)
         # Filter zero-padded frames (EOS/invalid steps), matching _extract_last_frame behavior
         valid_mask = audio_codes.any(dim=1)
         audio_codes = audio_codes[valid_mask]
-        ref_code = output.multimodal_output.get("codes.ref")
+        ref_code = mm_codes.get("ref")
         if isinstance(ref_code, list):
             ref_code = ref_code[0] if ref_code else None
         if isinstance(ref_code, torch.Tensor) and ref_code.numel() > 0:
@@ -43,7 +46,9 @@ def talker2code2wav(
             ref_code_len = 0
         # Code2Wav expects codebook-major flat: [Q*num_frames]
         codec_codes = audio_codes.transpose(0, 1).cpu().reshape(-1).tolist()
-        additional_information = {"meta.left_context_size": [ref_code_len]} if ref_code_len > 0 else None
+        additional_information = (
+            flatten_payload({"meta": {"left_context_size": [ref_code_len]}}) if ref_code_len > 0 else None
+        )
         code2wav_inputs.append(
             OmniTokensPrompt(
                 prompt_token_ids=codec_codes,
@@ -56,7 +61,8 @@ def talker2code2wav(
 
 
 def _extract_last_frame(pooling_output: dict[str, Any]) -> torch.Tensor | None:
-    audio_codes = pooling_output.get("codes.audio")
+    p = unflatten_payload(pooling_output)
+    audio_codes = p.get("codes", {}).get("audio")
     if not isinstance(audio_codes, torch.Tensor) or audio_codes.numel() == 0:
         return None
     if audio_codes.ndim == 2:
@@ -87,7 +93,8 @@ def talker2code2wav_async_chunk(
         if frame is not None:
             codec_codes = frame.cpu().tolist()
             transfer_manager.code_prompt_token_ids[request_id].append(codec_codes)
-        ref_code = pooling_output.get("codes.ref")
+        p = unflatten_payload(pooling_output)
+        ref_code = p.get("codes", {}).get("ref")
         if isinstance(ref_code, torch.Tensor) and ref_code.numel() > 0 and request_payload.get(request_id) is None:
             request_payload[request_id] = ref_code.to(torch.long).cpu().contiguous()
     elif not finished:
@@ -150,10 +157,12 @@ def talker2code2wav_async_chunk(
 
     if length <= 0:
         if finished:
-            return {
-                "codes.audio": [],
-                "meta.finished": torch.tensor(True, dtype=torch.bool),
-            }
+            return flatten_payload(
+                {
+                    "codes": {"audio": []},
+                    "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
+                }
+            )
         return None
 
     in_initial_phase = initial_chunk_size > 0 and initial_chunk_size < chunk_size and length < chunk_size
@@ -191,8 +200,9 @@ def talker2code2wav_async_chunk(
 
     code_predictor_codes = torch.tensor(window_frames).transpose(0, 1).reshape(-1).tolist()
 
-    return {
-        "codes.audio": code_predictor_codes,
-        "meta.left_context_size": left_context_size,
-        "meta.finished": torch.tensor(finished, dtype=torch.bool),
-    }
+    return flatten_payload(
+        {
+            "codes": {"audio": code_predictor_codes},
+            "meta": {"left_context_size": left_context_size, "finished": torch.tensor(finished, dtype=torch.bool)},
+        }
+    )

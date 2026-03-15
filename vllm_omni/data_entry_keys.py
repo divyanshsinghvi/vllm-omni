@@ -31,7 +31,8 @@ Existing keys (reference)
     hidden_states.last
     embed.prefill                  embed.decode
     embed.cached_decode            embed.tts_bos / tts_eos / tts_pad
-    embed.voice                    embed.speech_feat
+    embed.tts_pad_projected        embed.voice
+    embed.speech_feat              embed.thinker_reply
     ids.all        ids.prompt      ids.output
     ids.speech_token               ids.prior_image
     codes.audio                    codes.ref
@@ -42,8 +43,12 @@ Existing keys (reference)
     meta.visual_token_end_id       meta.gen_token_mask
     meta.generated_len             meta.omni_task
     meta.height                    meta.width
+    meta.decode_flag               meta.codec_streaming
+    meta.ref_code_len              meta.talker_prefill_offset
 
 This module provides:
+- Structured ``TypedDict`` types for static type checking (``OmniPayload``)
+- ``unflatten_payload`` / ``flatten_payload``: convert between flat and nested
 - ``_LEGACY_KEY_MAP``: old key name → canonical key name
 - ``normalize_keys(payload)``: translate any legacy keys in a dict
 - ``validate_key(key)``: check a key follows the naming convention
@@ -52,9 +57,81 @@ This module provides:
 from __future__ import annotations
 
 import logging
-from typing import Any
+import re
+from typing import Any, TypedDict
+
+import torch
 
 logger = logging.getLogger(__name__)
+
+# ── Structured payload types ──
+# These are TypedDicts (plain dicts at runtime, zero overhead) that give
+# static type checking and IDE autocomplete for inter-stage payloads.
+# Every field is optional (total=False) because each stage only populates
+# the subset it needs.
+
+
+class HiddenStates(TypedDict, total=False):
+    output: torch.Tensor
+    trailing_text: torch.Tensor
+    last: torch.Tensor
+    layers: dict[int, torch.Tensor]
+
+
+class Embeddings(TypedDict, total=False):
+    prefill: torch.Tensor
+    decode: torch.Tensor
+    cached_decode: torch.Tensor
+    tts_bos: torch.Tensor
+    tts_eos: torch.Tensor
+    tts_pad: torch.Tensor
+    tts_pad_projected: torch.Tensor
+    voice: torch.Tensor
+    speech_feat: torch.Tensor
+    thinker_reply: torch.Tensor
+
+
+class Codes(TypedDict, total=False):
+    audio: torch.Tensor
+    ref: torch.Tensor
+
+
+class Ids(TypedDict, total=False):
+    all: list[int]
+    prompt: list[int]
+    output: list[int]
+    speech_token: list[int]
+    prior_image: list[int]
+
+
+class OmniPayloadMeta(TypedDict, total=False):
+    finished: bool
+    left_context_size: int
+    override_keys: list[str]
+    num_processed_tokens: int
+    next_stage_prompt_len: int
+    ar_width: int
+    eol_token_id: int
+    visual_token_start_id: int
+    visual_token_end_id: int
+    gen_token_mask: torch.Tensor
+    generated_len: int
+    omni_task: list[str]
+    height: int
+    width: int
+    decode_flag: bool
+    codec_streaming: bool
+    ref_code_len: int
+    talker_prefill_offset: int
+
+
+class OmniPayload(TypedDict, total=False):
+    hidden_states: HiddenStates
+    embed: Embeddings
+    ids: Ids
+    codes: Codes
+    meta: OmniPayloadMeta
+
 
 # ── Legacy key mapping (old name → canonical name) ──
 _LEGACY_KEY_MAP: dict[str, str] = {
@@ -71,14 +148,17 @@ _LEGACY_KEY_MAP: dict[str, str] = {
     # embeddings
     "thinker_prefill_embeddings": "embed.prefill",
     "prompt_embeds": "embed.prefill",
+    "talker_prompt_embeds": "embed.prefill",
     "thinker_decode_embeddings": "embed.decode",
     "decode_output_prompt_embeds": "embed.decode",
     "cached_thinker_decode_embeddings": "embed.cached_decode",
     "tts_bos_embed": "embed.tts_bos",
     "tts_eos_embed": "embed.tts_eos",
     "tts_pad_embed": "embed.tts_pad",
+    "tts_pad_embed_projected": "embed.tts_pad_projected",
     "embedding": "embed.voice",
     "speech_feat": "embed.speech_feat",
+    "thinker_reply_part": "embed.thinker_reply",
     # token ids
     "thinker_sequences": "ids.all",
     "thinker_input_ids": "ids.prompt",
@@ -107,10 +187,16 @@ _LEGACY_KEY_MAP: dict[str, str] = {
     "omni_task": "meta.omni_task",
     "height": "meta.height",
     "width": "meta.width",
+    "decode_flag": "meta.decode_flag",
+    "codec_streaming": "meta.codec_streaming",
+    "ref_code_len": "meta.ref_code_len",
+    "talker_prefill_offset": "meta.talker_prefill_offset",
 }
 
 
 _VALID_TYPES = frozenset({"hidden_states", "embed", "ids", "codes", "meta"})
+
+_LAYER_RE = re.compile(r"^hidden_states\.layer_(\d+)$")
 
 
 def validate_key(key: str) -> bool:
@@ -153,3 +239,56 @@ def normalize_keys(payload: dict[str, Any], *, warn: bool = True) -> dict[str, A
                 )
             out[key] = value
     return out
+
+
+def unflatten_payload(flat: dict[str, Any]) -> OmniPayload:
+    """Convert a flat ``{type}.{qualifier}`` dict into a nested ``OmniPayload``.
+
+    Legacy key names are normalized first.  Keys that don't match the
+    ``{type}.{qualifier}`` convention are silently skipped.
+
+    The special pattern ``hidden_states.layer_N`` is grouped under
+    ``hidden_states["layers"][N]``.
+    """
+    nested: dict[str, Any] = {}
+    for key, value in flat.items():
+        # Normalize legacy keys
+        canonical = _LEGACY_KEY_MAP.get(key, key)
+
+        # Handle hidden_states.layer_N → layers dict
+        m = _LAYER_RE.match(canonical)
+        if m:
+            hs = nested.setdefault("hidden_states", {})
+            layers = hs.setdefault("layers", {})
+            layers[int(m.group(1))] = value
+            continue
+
+        parts = canonical.split(".", 1)
+        if len(parts) == 2 and parts[0] in _VALID_TYPES:
+            sub = nested.setdefault(parts[0], {})
+            sub[parts[1]] = value
+        # Non-conforming keys are silently dropped from the typed view.
+        # They remain accessible in the original flat dict.
+
+    return nested  # type: ignore[return-value]
+
+
+def flatten_payload(nested: OmniPayload) -> dict[str, Any]:
+    """Convert a nested ``OmniPayload`` back to a flat ``{type}.{qualifier}`` dict.
+
+    The ``hidden_states["layers"]`` sub-dict is expanded to individual
+    ``hidden_states.layer_N`` keys.
+    """
+    flat: dict[str, Any] = {}
+    for type_key in ("hidden_states", "embed", "ids", "codes", "meta"):
+        sub = nested.get(type_key)  # type: ignore[literal-required]
+        if sub is None:
+            continue
+        for qual, val in sub.items():
+            if qual == "layers" and type_key == "hidden_states":
+                if isinstance(val, dict):
+                    for layer_idx, tensor in val.items():
+                        flat[f"hidden_states.layer_{layer_idx}"] = tensor
+            else:
+                flat[f"{type_key}.{qual}"] = val
+    return flat

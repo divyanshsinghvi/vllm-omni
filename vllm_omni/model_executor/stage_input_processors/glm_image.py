@@ -8,6 +8,7 @@ import torch
 from vllm.inputs import TextPrompt
 from vllm.logger import init_logger
 
+from vllm_omni.data_entry_keys import unflatten_payload
 from vllm_omni.inputs.data import OmniTokensPrompt
 
 logger = init_logger(__name__)
@@ -187,7 +188,10 @@ def ar2diffusion(
         is_i2i = False
         if hasattr(ar_output, "multimodal_output") and ar_output.multimodal_output:
             mm_output = ar_output.multimodal_output
-            if isinstance(mm_output, dict) and mm_output.get("ids.prior_image") is not None:
+            if (
+                isinstance(mm_output, dict)
+                and unflatten_payload(mm_output).get("ids", {}).get("prior_image") is not None
+            ):
                 is_i2i = True
 
         # Parse and upsample prior tokens
@@ -202,7 +206,7 @@ def ar2diffusion(
         if hasattr(ar_output, "multimodal_output") and ar_output.multimodal_output:
             mm_output = ar_output.multimodal_output
             if isinstance(mm_output, dict):
-                raw_prior_image_ids = mm_output.get("ids.prior_image")
+                raw_prior_image_ids = unflatten_payload(mm_output).get("ids", {}).get("prior_image")
                 if raw_prior_image_ids is not None:
                     # Handle different formats:
                     # 1. Single tensor -> wrap in list
@@ -228,7 +232,7 @@ def ar2diffusion(
                 mm_output = output.multimodal_output
                 logger.debug(f"[ar2diffusion] Request {i}: found multimodal_output on CompletionOutput (fallback)")
                 if isinstance(mm_output, dict):
-                    raw_prior_image_ids = mm_output.get("ids.prior_image")
+                    raw_prior_image_ids = unflatten_payload(mm_output).get("ids", {}).get("prior_image")
                     if raw_prior_image_ids is not None:
                         if isinstance(raw_prior_image_ids, torch.Tensor):
                             prior_token_image_ids = [raw_prior_image_ids]

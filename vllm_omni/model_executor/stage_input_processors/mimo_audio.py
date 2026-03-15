@@ -4,6 +4,7 @@ import torch
 from vllm.inputs import TextPrompt
 from vllm.logger import init_logger
 
+from vllm_omni.data_entry_keys import flatten_payload, unflatten_payload
 from vllm_omni.inputs.data import OmniTokensPrompt
 from vllm_omni.model_executor.models.mimo_audio.config_mimo_audio import TALKER_CODEC_PAD_TOKEN_ID
 
@@ -47,7 +48,7 @@ def prepend_and_flatten_colmajor(x: torch.Tensor, pad_vec: torch.Tensor) -> torc
 
 def _make_finished_sentinel() -> dict[str, Any]:
     """Return a minimal payload with finished=True so Stage-1 can end the request."""
-    return {"codes.audio": [], "meta.finished": torch.tensor(True, dtype=torch.bool)}
+    return flatten_payload({"codes": {"audio": []}, "meta": {"finished": torch.tensor(True, dtype=torch.bool)}})
 
 
 def llm2code2wav_async_chunk(
@@ -62,12 +63,14 @@ def llm2code2wav_async_chunk(
     Accumulates codes in connector per request_id,
     returns payload only when chunk_size is full or request is finished; returns None when waiting.
     """
-    if "codes.audio" not in pooling_output:
+    po = unflatten_payload(pooling_output)
+    po_codes = po.get("codes", {})
+    if "audio" not in po_codes:
         if is_finished:
             return _make_finished_sentinel()
         return None
 
-    code_predictor_codes = pooling_output["codes.audio"]
+    code_predictor_codes = po_codes["audio"]
 
     if code_predictor_codes is None:
         if is_finished:
@@ -122,13 +125,16 @@ def llm2code2wav_async_chunk(
     context_length = chunk_length if chunk_length != 0 else chunk_size
     end_index = min(length, left_context_size + context_length)
 
-    info = {
-        "codes.audio": (
-            torch.tensor(transfer_manager.code_prompt_token_ids[request_id][-end_index:]).reshape(-1).tolist()
-        ),
-        "meta.finished": torch.tensor(is_finished, dtype=torch.bool),
-    }
-    return info
+    return flatten_payload(
+        {
+            "codes": {
+                "audio": torch.tensor(transfer_manager.code_prompt_token_ids[request_id][-end_index:])
+                .reshape(-1)
+                .tolist(),
+            },
+            "meta": {"finished": torch.tensor(is_finished, dtype=torch.bool)},
+        }
+    )
 
 
 def llm2code2wav(
@@ -173,8 +179,11 @@ def llm2code2wav(
 
         # Extract codec codes from talker output
         # Expected shape: [8, seq_len] (8-layer RVQ codes)
-        if "codes.audio" in output.multimodal_output:
-            codec_codes = output.multimodal_output["codes.audio"].to(torch.long)  # [seq_batch_size, 1, 8, 4]
+        mm = unflatten_payload(output.multimodal_output)
+        mm_codes = mm.get("codes", {})
+        mm_hs = mm.get("hidden_states", {})
+        if "audio" in mm_codes:
+            codec_codes = mm_codes["audio"].to(torch.long)  # [seq_batch_size, 1, 8, 4]
             is_all_zero = (codec_codes == 0).all(dim=(1, 2, 3))
             non_zero_indices = (~is_all_zero).nonzero(as_tuple=True)[0]
             if len(non_zero_indices) == 0:
@@ -188,7 +197,7 @@ def llm2code2wav(
             else:
                 if len(non_zero_indices) < codec_codes.shape[0]:
                     codec_codes = codec_codes[non_zero_indices]
-        elif "hidden_states.output" in output.multimodal_output and "codes.audio" not in output.multimodal_output:
+        elif "output" in mm_hs and "audio" not in mm_codes:
             codec_codes = torch.zeros(1, 1, 8, 4, dtype=torch.long)
         else:
             raise ValueError(f"Invalid multimodal_output: {output.multimodal_output}")

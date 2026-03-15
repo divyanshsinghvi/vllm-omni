@@ -64,56 +64,6 @@ class ModelArgs:
             self.intermediate_size = find_multiple(n_hidden, 256)
         # self.head_dim = self.dim // self.n_head
 
-    @classmethod
-    def from_name(cls, name: str):
-        if name in transformer_configs:
-            return cls(**transformer_configs[name])
-        # fuzzy search
-        config = [config for config in transformer_configs if config.lower() in str(name).lower()]
-
-        # We may have two or more configs matched (e.g. "7B" and "Mistral-7B"). Find the best config match,
-        # take longer name (as it have more symbols matched)
-        if len(config) > 1:
-            config.sort(key=len, reverse=True)
-            assert len(config[0]) != len(config[1]), name  # make sure only one 'best' match
-
-        return cls(**transformer_configs[config[0]])
-
-
-transformer_configs = {
-    "CodeLlama-7b-Python-hf": dict(block_size=16384, vocab_size=32000, n_layer=32, dim=4096, rope_base=1000000),
-    "7B": dict(n_layer=32, n_head=32, dim=4096),
-    "13B": dict(n_layer=40, n_head=40, dim=5120),
-    "30B": dict(n_layer=60, n_head=52, dim=6656),
-    "34B": dict(
-        n_layer=48, n_head=64, dim=8192, vocab_size=32000, n_local_heads=8, intermediate_size=22016, rope_base=1000000
-    ),  # CodeLlama-34B-Python-hf
-    "70B": dict(n_layer=80, n_head=64, dim=8192, n_local_heads=8, intermediate_size=28672),
-    "Mistral-7B": dict(n_layer=32, n_head=32, n_local_heads=8, dim=4096, intermediate_size=14336, vocab_size=32000),
-    "stories15M": dict(n_layer=6, n_head=6, dim=288),
-    "stories110M": dict(n_layer=12, n_head=12, dim=768),
-    "llama-3-8b": dict(
-        block_size=8192,
-        n_layer=32,
-        n_head=32,
-        n_local_heads=8,
-        dim=4096,
-        intermediate_size=14336,
-        vocab_size=128256,
-        rope_base=500000,
-    ),
-    "llama-3-70b": dict(
-        block_size=8192,
-        n_layer=80,
-        n_head=64,
-        n_local_heads=8,
-        dim=8192,
-        intermediate_size=28672,
-        vocab_size=128256,
-        rope_base=500000,
-    ),
-}
-
 
 class KVCache(nn.Module):
     def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim, dtype=torch.bfloat16):
@@ -210,10 +160,6 @@ class Transformer(nn.Module):
         x = self.norm(x, c)
         return x
 
-    @classmethod
-    def from_name(cls, name: str):
-        return cls(ModelArgs.from_name(name))
-
 
 class TransformerBlock(nn.Module):
     def __init__(self, config: ModelArgs) -> None:
@@ -281,14 +227,6 @@ class Attention(nn.Module):
         self.head_dim = config.head_dim
         self.n_local_heads = config.n_local_heads
         self.dim = config.dim
-        # self._register_load_state_dict_pre_hook(self.load_hook)
-
-    # def load_hook(self, state_dict, prefix, *args):
-    #     if prefix + "wq.weight" in state_dict:
-    #         wq = state_dict.pop(prefix + "wq.weight")
-    #         wk = state_dict.pop(prefix + "wk.weight")
-    #         wv = state_dict.pop(prefix + "wv.weight")
-    #         state_dict[prefix + "wqkv.weight"] = torch.cat([wq, wk, wv])
 
     def forward(
         self,

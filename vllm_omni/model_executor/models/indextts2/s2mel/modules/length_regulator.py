@@ -1,9 +1,9 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from dac.nn.quantize import VectorQuantize
 from torch.nn import functional as F
 
-from vllm_omni.model_executor.models.indextts2.s2mel.dac.nn.quantize import VectorQuantize
 from vllm_omni.model_executor.models.indextts2.s2mel.modules.commons import sequence_mask
 
 # f0_bin = 256

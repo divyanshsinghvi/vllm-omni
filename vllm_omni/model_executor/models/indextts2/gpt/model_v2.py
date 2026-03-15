@@ -3,7 +3,7 @@ import functools
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import GPT2Config, LogitsProcessorList
+from transformers import GenerationMixin, GPT2Config, GPT2Model, GPT2PreTrainedModel, LogitsProcessorList
 
 # from transformers import GPT2Config, GPT2PreTrainedModel, LogitsProcessorList
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
@@ -11,7 +11,6 @@ from transformers.utils.model_parallel_utils import assert_device_map, get_devic
 
 from vllm_omni.model_executor.models.indextts2.gpt.conformer_encoder import ConformerEncoder
 from vllm_omni.model_executor.models.indextts2.gpt.perceiver import PerceiverResampler
-from vllm_omni.model_executor.models.indextts2.gpt.transformers_gpt2 import GPT2Model, GPT2PreTrainedModel
 from vllm_omni.model_executor.models.indextts2.utils.arch_util import AttentionBlock
 from vllm_omni.model_executor.models.indextts2.utils.typical_sampling import TypicalLogitsWarper
 
@@ -39,7 +38,7 @@ class ResBlock(nn.Module):
         return F.relu(self.net(x) + x)
 
 
-class GPT2InferenceModel(GPT2PreTrainedModel):
+class GPT2InferenceModel(GPT2PreTrainedModel, GenerationMixin):
     def __init__(self, config, gpt, text_pos_emb, embeddings, norm, linear, kv_cache=False):
         super().__init__(config)
         # Note: the argument named `text_pos_emb` here actually represents the mel position embedding

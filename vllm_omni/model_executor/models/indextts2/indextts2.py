@@ -19,27 +19,12 @@ from vllm.multimodal.processing import (
     ProcessorInputs,
     PromptUpdate,
 )
-from vllm.renderers.registry import RENDERER_REGISTRY
 from vllm.sequence import IntermediateTensors
-from vllm.tokenizers import TokenizerRegistry
 
 from vllm_omni.model_executor.models.indextts2.index_tts_config import IndexTTS2Config
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 
 logger = init_logger(__name__)
-
-TokenizerRegistry.register(
-    "indextts2",
-    module="vllm_omni.model_executor.models.indextts2.tokenizer",
-    class_name="IndexTTS2Tokenizer",
-)
-
-# Register indextts2 renderer (reuses the HF renderer)
-RENDERER_REGISTRY.register(
-    "indextts2",
-    module="vllm.renderers.hf",
-    class_name="HfRenderer",
-)
 
 
 class IndexTTS2ProcessingInfo(BaseProcessingInfo):

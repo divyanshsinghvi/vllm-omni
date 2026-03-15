@@ -1,5 +1,8 @@
 import os
 
+from transformers import PreTrainedTokenizer
+from vllm.logger import init_logger
+
 # # Suppress verbose logging from tn/WeTextProcessing
 # # The tn library creates loggers with INFO level and adds handlers each time,
 # # so we use a filter that can't be overridden
@@ -11,9 +14,7 @@ import os
 #     _logger = logging.getLogger(_name)
 #     _logger.addFilter(_BlockAllFilter())
 #     _logger.propagate = False  # Prevent propagation to root logger
-from indextts.utils.front import TextNormalizer, TextTokenizer
-from transformers import PreTrainedTokenizer
-from vllm.logger import init_logger
+from vllm_omni.model_executor.models.indextts2.utils.front import TextNormalizer, TextTokenizer
 
 logger = init_logger(__name__)
 
@@ -43,6 +44,10 @@ class IndexTTS2Tokenizer(PreTrainedTokenizer):
     @property
     def max_token_id(self):
         return self.vocab_size - 1
+
+    @property
+    def max_chars_per_token(self):
+        return max(len(tok) for tok in self._tok.get_vocab())
 
     def get_vocab(self):
         return self._tok.get_vocab()

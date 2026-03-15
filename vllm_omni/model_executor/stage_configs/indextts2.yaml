@@ -9,8 +9,8 @@ stage_args:
       scheduler_cls: vllm_omni.core.sched.omni_generation_scheduler.OmniGenerationScheduler
       model_arch: IndexTTS2Model
       trust_remote_code: true
-      tokenizer_mode: auto
-      tokenizer: pretrained_models/IndexTTS2/qwen0.6bemo4-merge
+      tokenizer_mode: indextts2
+      tokenizer: pretrained_models/IndexTTS2
       gpu_memory_utilization: 0.1
       enable_prefix_caching: false
       disable_hybrid_kv_cache_manager: true
@@ -31,8 +31,8 @@ stage_args:
       scheduler_cls: vllm_omni.core.sched.omni_generation_scheduler.OmniGenerationScheduler
       model_arch: IndexTTS2Model
       trust_remote_code: true
-      tokenizer_mode: auto
-      tokenizer: pretrained_models/IndexTTS2/qwen0.6bemo4-merge
+      tokenizer_mode: indextts2
+      tokenizer: pretrained_models/IndexTTS2
       gpu_memory_utilization: 0.1
       runner: "generate"
       dtype: "float32"

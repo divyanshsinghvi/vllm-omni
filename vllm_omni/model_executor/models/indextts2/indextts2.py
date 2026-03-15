@@ -480,7 +480,7 @@ class IndexTTS2Model(nn.Module):
             safetensors.torch.load_model(semantic_codec, semantic_code_ckpt)
             self.semantic_codec = semantic_codec.to(self.device).eval()
 
-            from vllm_omni.model_executor.models.indextts2.s2mel.modules.campplus.DTDNN import CAMPPlus
+            from vllm_omni.model_executor.models.indextts2.s2mel.modules.campplus.dtdnn import CAMPPlus
 
             campplus_ckpt_path = hf_hub_download("funasr/campplus", filename="campplus_cn_common.bin")
             self.campplus_model = CAMPPlus(feat_dim=80, embedding_size=192)

@@ -41,6 +41,8 @@ def register_omni_models_to_vllm():
 
     _register_omni_hf_configs()
 
+    import vllm_omni.tokenizers  # noqa: F401 - registers custom tokenizers and renderers
+
     supported_archs = ModelRegistry.get_supported_archs()
     for arch, (mod_folder, mod_relname, cls_name) in _OMNI_MODELS.items():
         if arch not in supported_archs:

@@ -50,7 +50,7 @@ class IndexTTS2Processor(BaseMultiModalProcessor[IndexTTS2ProcessingInfo]):
         model_dir = self.info.ctx.model_config.model
         bpe_path = os.path.join(model_dir, config.dataset["bpe_model"])
 
-        from indextts.utils.front import TextNormalizer, TextTokenizer
+        from vllm_omni.model_executor.models.indextts2.utils.front import TextNormalizer, TextTokenizer
 
         normalizer = TextNormalizer(enable_glossary=True)
         normalizer.load()
@@ -129,7 +129,7 @@ class IndexTTS2Model(nn.Module):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         if self.model_stage == "gpt":
-            from indextts.gpt.model_v2 import UnifiedVoice
+            from vllm_omni.model_executor.models.indextts2.gpt.model_v2 import UnifiedVoice
 
             self.talker = UnifiedVoice(**self.cfg.gpt)
             self.stop_mel_token = self.cfg.gpt["stop_mel_token"]
@@ -144,7 +144,7 @@ class IndexTTS2Model(nn.Module):
         elif self.model_stage == "s2mel":
             from types import SimpleNamespace
 
-            from indextts.s2mel.modules.commons import MyModel
+            from vllm_omni.model_executor.models.indextts2.s2mel.modules.commons import MyModel
 
             def dict_to_namespace(d):
                 if isinstance(d, dict):
@@ -451,7 +451,7 @@ class IndexTTS2Model(nn.Module):
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         if self.model_stage == "gpt":
-            from indextts.utils.checkpoint import load_checkpoint
+            from vllm_omni.model_executor.models.indextts2.utils.checkpoint import load_checkpoint
 
             self.talker_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
             load_checkpoint(self.talker, self.talker_path)
@@ -472,21 +472,22 @@ class IndexTTS2Model(nn.Module):
 
             import safetensors.torch
             from huggingface_hub import hf_hub_download
-            from indextts.utils.maskgct_utils import build_semantic_codec
+
+            from vllm_omni.model_executor.models.indextts2.utils.maskgct_utils import build_semantic_codec
 
             semantic_codec = build_semantic_codec(self.cfg.semantic_codec)
             semantic_code_ckpt = hf_hub_download("amphion/MaskGCT", filename="semantic_codec/model.safetensors")
             safetensors.torch.load_model(semantic_codec, semantic_code_ckpt)
             self.semantic_codec = semantic_codec.to(self.device).eval()
 
-            from indextts.s2mel.modules.campplus.DTDNN import CAMPPlus
+            from vllm_omni.model_executor.models.indextts2.s2mel.modules.campplus.DTDNN import CAMPPlus
 
             campplus_ckpt_path = hf_hub_download("funasr/campplus", filename="campplus_cn_common.bin")
             self.campplus_model = CAMPPlus(feat_dim=80, embedding_size=192)
             self.campplus_model.load_state_dict(torch.load(campplus_ckpt_path, map_location="cpu"))
             self.campplus_model = self.campplus_model.to(self.device).eval()
 
-            from indextts.s2mel.modules.audio import mel_spectrogram
+            from vllm_omni.model_executor.models.indextts2.s2mel.modules.audio import mel_spectrogram
 
             mel_fn_args = {
                 "n_fft": self.cfg.s2mel["preprocess_params"]["spect_params"]["n_fft"],
@@ -503,7 +504,7 @@ class IndexTTS2Model(nn.Module):
             self.mel_fn = lambda x: mel_spectrogram(x, **mel_fn_args)
 
         elif self.model_stage == "s2mel":
-            from indextts.s2mel.modules.commons import load_checkpoint2
+            from vllm_omni.model_executor.models.indextts2.s2mel.modules.commons import load_checkpoint2
 
             s2mel_path = os.path.join(self.model_dir, self.cfg.s2mel_checkpoint)
             self.s2mel, _, _, _ = load_checkpoint2(
@@ -520,14 +521,15 @@ class IndexTTS2Model(nn.Module):
 
             import safetensors.torch
             from huggingface_hub import hf_hub_download
-            from indextts.utils.maskgct_utils import build_semantic_codec
+
+            from vllm_omni.model_executor.models.indextts2.utils.maskgct_utils import build_semantic_codec
 
             semantic_codec = build_semantic_codec(self.cfg.semantic_codec)
             semantic_code_ckpt = hf_hub_download("amphion/MaskGCT", filename="semantic_codec/model.safetensors")
             safetensors.torch.load_model(semantic_codec, semantic_code_ckpt)
             self.semantic_codec = semantic_codec.to(self.device).eval()
 
-            from indextts.s2mel.modules.bigvgan import bigvgan as bigvgan_module
+            from vllm_omni.model_executor.models.indextts2.s2mel.modules.bigvgan import bigvgan as bigvgan_module
 
             bigvgan_name = self.cfg.vocoder["name"]
             self.bigvgan = bigvgan_module.BigVGAN.from_pretrained(bigvgan_name, use_cuda_kernel=False)

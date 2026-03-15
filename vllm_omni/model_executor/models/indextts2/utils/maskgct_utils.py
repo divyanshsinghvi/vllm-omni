@@ -1,4 +1,4 @@
-from vllm_omni.model_executor.models.indextts2.utils.maskgct.models.codec.kmeans.repcodec_model import RepCodec
+from vllm_omni.model_executor.models.indextts2.utils.maskgct.repcodec_model import RepCodec
 
 
 def build_semantic_codec(cfg):

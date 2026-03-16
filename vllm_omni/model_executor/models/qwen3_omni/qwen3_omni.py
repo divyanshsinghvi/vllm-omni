@@ -404,7 +404,7 @@ class Qwen3OmniMoeForConditionalGeneration(
             text_hidden_states, captured_layer_dict = model_outputs
             # Compute thinker-side TTS token embeddings for BOS/EOS/PAD and expose via multimodal outputs.
             # These will later be projected into talker text space by the talker stage.
-            multimodal_outputs = captured_layer_dict if captured_layer_dict is not None else {}
+            multimodal_outputs: OmniPayload = captured_layer_dict if captured_layer_dict is not None else {}
             try:
                 thinker_tts_embeds = self.thinker.embed_input_ids(self.tts_tokens)  # [1,3,thinker_hidden]
                 if (
@@ -413,9 +413,10 @@ class Qwen3OmniMoeForConditionalGeneration(
                     and thinker_tts_embeds.shape[1] == 3
                 ):
                     bos_eos_pad = thinker_tts_embeds.to(text_hidden_states.device).chunk(3, dim=1)  # 3 * [1,1,H]
-                    multimodal_outputs["embed.tts_bos"] = [bos_eos_pad[0]]
-                    multimodal_outputs["embed.tts_eos"] = [bos_eos_pad[1]]
-                    multimodal_outputs["embed.tts_pad"] = [bos_eos_pad[2]]
+                    embed = multimodal_outputs.setdefault("embed", {})
+                    embed["tts_bos"] = [bos_eos_pad[0]]
+                    embed["tts_eos"] = [bos_eos_pad[1]]
+                    embed["tts_pad"] = [bos_eos_pad[2]]
             except Exception:
                 # Best-effort; absence will be handled by talker with fallbacks
                 pass
@@ -440,8 +441,9 @@ class Qwen3OmniMoeForConditionalGeneration(
             if "runtime_additional_information" in kwargs and "model_intermediate_buffer" not in kwargs:
                 logger.warning_once("runtime_additional_information is deprecated, use model_intermediate_buffer")
             code_predictor_codes = [info.get("codes.audio") for info in info_dicts]
-            multimodal_outputs = {"codes.audio": torch.cat(code_predictor_codes, dim=0)}
-            span_len = multimodal_outputs["codes.audio"].shape[0]
+            audio_codes = torch.cat(code_predictor_codes, dim=0)
+            multimodal_outputs: OmniPayload = {"codes": {"audio": audio_codes}}
+            span_len = audio_codes.shape[0]
             talker_hidden = talker_hidden[:span_len]
             return OmniOutput(text_hidden_states=talker_hidden, multimodal_outputs=multimodal_outputs)
         elif self.model_stage == "code2wav":

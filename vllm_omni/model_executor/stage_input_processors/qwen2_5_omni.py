@@ -1,7 +1,6 @@
 import torch
 from vllm.inputs import TextPrompt
 
-from vllm_omni.data_entry_keys import flatten_payload, unflatten_payload
 from vllm_omni.inputs.data import OmniTokensPrompt
 
 TALKER_CODEC_PAD_TOKEN_ID = 8292
@@ -35,22 +34,20 @@ def thinker2talker(
         prompt_token_ids = thinker_output.prompt_token_ids
         thinker_output_ids = output.token_ids
         prompt_token_ids_len = len(prompt_token_ids)
-        mm = unflatten_payload(output.multimodal_output)
+        mm = output.multimodal_output
         latent = mm["hidden_states"]["output"]
         thinker_hidden_states = latent.clone().detach().to(latent.device)
-        additional_information = flatten_payload(
-            {
-                "hidden_states": {
-                    "output": thinker_hidden_states[prompt_token_ids_len:].to(torch.float32),
-                    "output_shape": list(thinker_hidden_states[prompt_token_ids_len:].shape),
-                },
-                "embed": {
-                    "prefill": thinker_hidden_states[:prompt_token_ids_len].to(torch.float32),
-                    "prefill_shape": list(thinker_hidden_states[:prompt_token_ids_len].shape),
-                },
-                "ids": {"prompt": prompt_token_ids, "output": thinker_output_ids},
-            }
-        )
+        additional_information = {
+            "hidden_states": {
+                "output": thinker_hidden_states[prompt_token_ids_len:].to(torch.float32),
+                "output_shape": list(thinker_hidden_states[prompt_token_ids_len:].shape),
+            },
+            "embed": {
+                "prefill": thinker_hidden_states[:prompt_token_ids_len].to(torch.float32),
+                "prefill_shape": list(thinker_hidden_states[:prompt_token_ids_len].shape),
+            },
+            "ids": {"prompt": prompt_token_ids, "output": thinker_output_ids},
+        }
         talker_inputs.append(
             OmniTokensPrompt(
                 prompt_token_ids=[TALKER_CODEC_START_TOKEN_ID]

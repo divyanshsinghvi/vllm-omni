@@ -43,7 +43,6 @@ from vllm.utils.platform_utils import is_pin_memory_available
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler
 
-from vllm_omni.data_entry_keys import flatten_payload
 from vllm_omni.model_executor.custom_process_mixin import CustomProcessMixin
 from vllm_omni.model_executor.models.mimo_audio.config_mimo_audio import (
     NO_INTERLEAVE_NEXT_TOKEN_ID,
@@ -801,7 +800,7 @@ class MiMoAudioForConditionalGeneration(
 
             return OmniOutput(
                 text_hidden_states=text_hidden_states.reshape(-1, text_hidden_states.shape[-1]),
-                multimodal_outputs=flatten_payload({"codes": {"audio": next_speech_tokens}}),
+                multimodal_outputs={"codes": {"audio": next_speech_tokens}},
             )
 
         if self.model_stage == "code2wav":

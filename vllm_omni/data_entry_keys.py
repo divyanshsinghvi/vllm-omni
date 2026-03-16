@@ -131,6 +131,7 @@ class OmniPayload(TypedDict, total=False):
     ids: Ids
     codes: Codes
     meta: OmniPayloadMeta
+    model_outputs: list[torch.Tensor]
 
 
 # ── Legacy key mapping (old name → canonical name) ──

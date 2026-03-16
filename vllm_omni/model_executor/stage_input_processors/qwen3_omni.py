@@ -9,7 +9,7 @@ import torch
 from vllm.inputs import TextPrompt
 from vllm.platforms import current_platform
 
-from vllm_omni.data_entry_keys import OmniPayload, flatten_payload, unflatten_payload
+from vllm_omni.data_entry_keys import OmniPayload
 from vllm_omni.engine import OmniEngineCoreRequest
 from vllm_omni.inputs.data import OmniTokensPrompt
 
@@ -100,10 +100,9 @@ def thinker2talker_async_chunk(
 
     request_id = request.external_req_id
     chunk_id = transfer_manager.put_req_chunk[request_id]
-    thinker = unflatten_payload(pooling_output)
-    thinker_hs = thinker.get("hidden_states", {})
+    thinker_hs = pooling_output.get("hidden_states", {})
     thinker_layers = thinker_hs.get("layers", {})
-    thinker_embed = thinker.get("embed", {})
+    thinker_embed = pooling_output.get("embed", {})
 
     if chunk_id == 0:
         all_token_ids = request.all_token_ids  # prefill + decode
@@ -123,22 +122,25 @@ def thinker2talker_async_chunk(
             "ids": {"all": all_token_ids, "prompt": prompt_token_ids},
             "meta": {"finished": torch.tensor(is_finished, dtype=torch.bool)},
         }
-        talker_additional_info = flatten_payload(payload)
+        talker_additional_info = payload
         if transfer_manager.request_payload.get(request_id) is None:
             if not is_finished:
                 transfer_manager.request_payload[request_id] = talker_additional_info
                 return None
         else:
             save_payload = transfer_manager.request_payload.pop(request_id)
-            talker_additional_info["embed.prefill"] = torch.cat(
+            talker_additional_info["embed"]["prefill"] = torch.cat(
                 (
-                    save_payload.get("embed.prefill"),
-                    talker_additional_info.get("embed.prefill"),
+                    save_payload.get("embed", {}).get("prefill"),
+                    talker_additional_info.get("embed", {}).get("prefill"),
                 ),
                 dim=0,
             )
-            talker_additional_info["hidden_states.output"] = torch.cat(
-                (save_payload.get("hidden_states.output"), talker_additional_info.get("hidden_states.output")),
+            talker_additional_info["hidden_states"]["output"] = torch.cat(
+                (
+                    save_payload.get("hidden_states", {}).get("output"),
+                    talker_additional_info.get("hidden_states", {}).get("output"),
+                ),
                 dim=0,
             )
     else:
@@ -146,19 +148,17 @@ def thinker2talker_async_chunk(
         # Convert ConstantList to regular list for OmniSerializer serialization
         output_token_ids = _ensure_list(output_token_ids)
 
-        talker_additional_info = flatten_payload(
-            {
-                "meta": {"finished": torch.tensor(is_finished, dtype=torch.bool)},
-            }
-        )
+        talker_additional_info: OmniPayload = {
+            "meta": {"finished": torch.tensor(is_finished, dtype=torch.bool)},
+        }
         if output_token_ids:
-            talker_additional_info["meta.override_keys"] = ["embed.decode", "ids.output"]
-            talker_additional_info["embed.decode"] = thinker_layers[0].detach().cpu()
-            talker_additional_info["ids.output"] = output_token_ids
+            talker_additional_info["meta"]["override_keys"] = ["embed.decode", "ids.output"]
+            talker_additional_info["embed"] = {"decode": thinker_layers[0].detach().cpu()}
+            talker_additional_info["ids"] = {"output": output_token_ids}
         else:
             # When prefilling a chunked thinker, thinker_hidden_states needs to be updated.
-            talker_additional_info["embed.prefill"] = thinker_layers[0].detach().cpu()
-            talker_additional_info["hidden_states.output"] = thinker_layers[24].detach().cpu()
+            talker_additional_info["embed"] = {"prefill": thinker_layers[0].detach().cpu()}
+            talker_additional_info["hidden_states"] = {"output": thinker_layers[24].detach().cpu()}
     return talker_additional_info
 
 
@@ -193,7 +193,7 @@ def thinker2talker(
     # Process each thinker output
     for thinker_output in thinker_outputs:
         output = thinker_output.outputs[0]
-        mm = unflatten_payload(output.multimodal_output)
+        mm: OmniPayload = output.multimodal_output
         mm_hs = mm.get("hidden_states", {})
         mm_layers = mm_hs.get("layers", {})
         mm_embed = mm.get("embed", {})
@@ -213,7 +213,7 @@ def thinker2talker(
                 "prompt": thinker_output.prompt_token_ids,
             },
         }
-        info = flatten_payload(payload)
+        info = payload
 
         prompt_len = _compute_talker_prompt_ids_length(payload, device=device)
 
@@ -243,8 +243,7 @@ def talker2code2wav_async_chunk(
     """
     Pooling version.
     """
-    talker = unflatten_payload(pooling_output)
-    talker_codes = talker.get("codes", {})
+    talker_codes = pooling_output.get("codes", {})
     code_predictor_codes = talker_codes.get("audio")
     if code_predictor_codes is None:
         return None
@@ -295,12 +294,10 @@ def talker2code2wav_async_chunk(
         .tolist()
     )
 
-    return flatten_payload(
-        {
-            "codes": {"audio": codes},
-            "meta": {"left_context_size": left_context_size, "finished": torch.tensor(is_finished, dtype=torch.bool)},
-        }
-    )
+    return {
+        "codes": {"audio": codes},
+        "meta": {"left_context_size": left_context_size, "finished": torch.tensor(is_finished, dtype=torch.bool)},
+    }
 
 
 def talker2code2wav(
@@ -332,7 +329,7 @@ def talker2code2wav(
     for talker_output in talker_outputs:
         output = talker_output.outputs[0]
         seq_len = len(output.token_ids) - 1
-        mm = unflatten_payload(output.multimodal_output)
+        mm: OmniPayload = output.multimodal_output
         # Extract codec codes from talker output
         # Expected shape: [8, seq_len] (8-layer RVQ codes)
         codec_codes = (

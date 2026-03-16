@@ -19,6 +19,7 @@ from vllm.utils import length_from_prompt_token_ids_or_embeds
 from vllm.utils.jsontree import json_iter_leaves
 from vllm.v1.engine.input_processor import InputProcessor
 
+from vllm_omni.data_entry_keys import flatten_payload
 from vllm_omni.engine import (
     AdditionalInformationEntry,
     AdditionalInformationPayload,
@@ -257,6 +258,7 @@ class OmniInputProcessor(InputProcessor):
         if isinstance(raw_info, AdditionalInformationPayload):
             additional_information_payload = raw_info
         elif raw_info is not None:
+            raw_info = flatten_payload(raw_info)
             entries: dict[str, AdditionalInformationEntry] = {}
             for key, value in raw_info.items():
                 if isinstance(value, torch.Tensor):

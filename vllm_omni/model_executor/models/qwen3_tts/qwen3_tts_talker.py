@@ -489,13 +489,13 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
         audio_codes = torch.cat(audio_codes_list, dim=0)
         span_len = int(audio_codes.shape[0])
         hidden = hidden[:span_len]
-        mm: dict[str, torch.Tensor] = {"codes.audio": audio_codes}
+        mm: OmniPayload = {"codes": {"audio": audio_codes}}
         if ref_code_len_list:
-            mm["meta.ref_code_len"] = torch.cat(ref_code_len_list, dim=0)[:span_len]
+            mm.setdefault("meta", {})["ref_code_len"] = torch.cat(ref_code_len_list, dim=0)[:span_len]
         if ref_code_tensor is not None:
-            mm["codes.ref"] = [ref_code_tensor]
+            mm.setdefault("codes", {})["ref"] = [ref_code_tensor]
         if codec_streaming_list:
-            mm["meta.codec_streaming"] = torch.cat(codec_streaming_list, dim=0)[:span_len]
+            mm.setdefault("meta", {})["codec_streaming"] = torch.cat(codec_streaming_list, dim=0)[:span_len]
         return OmniOutput(text_hidden_states=hidden, multimodal_outputs=mm)
 
     # -------------------- preprocess / postprocess --------------------

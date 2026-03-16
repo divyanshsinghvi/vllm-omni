@@ -20,7 +20,6 @@ from vllm.v1.worker.gpu_input_batch import CachedRequestState
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner, IntermediateTensors, PerLayerAttnMetadata
 from vllm.v1.worker.ubatch_utils import maybe_create_ubatch_slices
 
-from vllm_omni.data_entry_keys import normalize_keys
 from vllm_omni.model_executor.layers.rotary_embedding.mrope import OmniMRotaryEmbedding as MRotaryEmbedding
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 
@@ -1301,12 +1300,12 @@ class OmniGPUModelRunner(GPUModelRunner):
             req_embeds, code_predictor_codes = self.talker_mtp(req_input_ids, req_embeds, last_talker_hidden, text_step)
         # update the inputs_embeds and code_predictor_codes
         code_predictor_codes_cpu = code_predictor_codes.detach().to("cpu").contiguous()
-        out_key = getattr(self.model, "talker_mtp_output_key", "codes.audio")
+        out_key = getattr(self.model, "talker_mtp_output_key", ("codes", "audio"))
         for idx, req_id in enumerate(decode_req_ids):
             req_index = self.input_batch.req_ids.index(req_id)
             start_offset = int(self.query_start_loc.cpu[req_index])
             inputs_embeds[start_offset : start_offset + 1] = req_embeds[idx : idx + 1]
-            update_dict = {out_key: code_predictor_codes_cpu[idx : idx + 1]}
+            update_dict = {out_key[0]: {out_key[1]: code_predictor_codes_cpu[idx : idx + 1]}}
             self._merge_additional_information_update(req_id, update_dict)
 
     def _model_forward(
@@ -1334,30 +1333,37 @@ class OmniGPUModelRunner(GPUModelRunner):
         self._omni_last_model_output = model_output
         return model_output
 
+    def _store_value(self, dest: dict, key: str, value: Any, gpu_keys: set) -> None:
+        if isinstance(value, torch.Tensor):
+            if key in gpu_keys:
+                dest[key] = value.detach().clone()
+            else:
+                dest[key] = value.detach().to("cpu").contiguous()
+        elif isinstance(value, list):
+            dest[key] = [
+                (item.detach().to("cpu").contiguous() if isinstance(item, torch.Tensor) else item) for item in value
+            ]
+        else:
+            dest[key] = value
+
     def _update_intermediate_buffer(self, req_id: str, upd: dict) -> None:
         if not isinstance(upd, dict) or not upd:
             return
         req_state = self.requests.get(req_id)
         if req_state is None:
             return
-        upd = normalize_keys(upd, warn=True)
-        # Check if the model declares keys that should stay on GPU
-        gpu_keys: set[str] = set()
+        # Check if the model declares keys that should stay on GPU (tuples of (type_key, qualifier))
+        gpu_keys: set[tuple[str, str]] = set()
         if hasattr(self, "model") and hasattr(self.model, "gpu_resident_buffer_keys"):
             gpu_keys = self.model.gpu_resident_buffer_keys
         existing = self.model_intermediate_buffer.setdefault(req_id, {})
         for k, v in upd.items():
-            if isinstance(v, torch.Tensor):
-                if k in gpu_keys:
-                    existing[k] = v.detach().clone()
-                else:
-                    existing[k] = v.detach().to("cpu").contiguous()
-            elif isinstance(v, list):
-                existing[k] = [
-                    (item.detach().to("cpu").contiguous() if isinstance(item, torch.Tensor) else item) for item in v
-                ]
+            if isinstance(v, dict):
+                existing_sub = existing.setdefault(k, {})
+                for qual, val in v.items():
+                    self._store_value(existing_sub, qual, val, {q for tk, q in gpu_keys if tk == k})
             else:
-                existing[k] = v
+                self._store_value(existing, k, v, set())
         # Backward compatible: mirror to old setattr location
         setattr(req_state, "additional_information_cpu", existing)
 

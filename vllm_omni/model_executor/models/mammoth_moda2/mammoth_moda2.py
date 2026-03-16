@@ -46,7 +46,6 @@ from vllm.transformers_utils.config import (
     set_default_rope_theta,
 )
 
-from vllm_omni.data_entry_keys import unflatten_payload
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 from vllm_omni.model_executor.models.utils import add_prefix_to_loaded_weights
 from vllm_omni.transformers_utils.configs.mammoth_moda2 import Mammothmoda2Config
@@ -609,8 +608,7 @@ class MammothModa2ARForConditionalGeneration(Qwen2_5_VLForConditionalGeneration)
         num_reqs = int(logits.shape[0])
         for i in range(num_reqs):
             runtime_info = runtime_infos[i] if isinstance(runtime_infos[i], dict) else {}
-            payload = unflatten_payload(runtime_info)
-            meta = payload.get("meta", {})
+            meta = runtime_info.get("meta", {})
             omni_task = meta.get("omni_task")
             if not isinstance(omni_task, list) or not omni_task or omni_task[0] != "t2i":
                 # Text/understanding/chat: forbid sampling from the extra gen vocab.

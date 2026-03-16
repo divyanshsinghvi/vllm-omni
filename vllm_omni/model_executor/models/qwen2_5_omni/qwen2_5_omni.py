@@ -32,7 +32,7 @@ from vllm.v1.outputs import SamplerOutput
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler
 
-from vllm_omni.data_entry_keys import OmniPayload, unflatten_payload
+from vllm_omni.data_entry_keys import OmniPayload
 from vllm_omni.model_executor.custom_process_mixin import CustomProcessMixin
 from vllm_omni.model_executor.model_loader.weight_utils import download_weights_from_hf_specific
 from vllm_omni.model_executor.models.output_templates import OmniOutput
@@ -658,7 +658,7 @@ class Qwen2_5OmniForConditionalGeneration(
         # - For Decode segments, if per-request auxiliary decode embeddings are provided (optional),
         #   add them; otherwise, keep the original embedding.
 
-        payload: OmniPayload = unflatten_payload(info_dict)
+        payload: OmniPayload = info_dict
 
         # Ensure we have base embeddings when only ids are provided
         if input_embeds is None and input_ids is not None:
@@ -712,7 +712,7 @@ class Qwen2_5OmniForConditionalGeneration(
         )
 
         if thinker_result.ndim == 2 and thinker_result.shape[0] > 0:
-            update_dict["embed.thinker_reply"] = thinker_result[1:].detach().to("cpu").contiguous()
+            update_dict.setdefault("embed", {})["thinker_reply"] = thinker_result[1:].detach().to("cpu").contiguous()
 
         return req_input_ids, req_embeds, update_dict
 
@@ -771,7 +771,7 @@ class Qwen2_5OmniForConditionalGeneration(
         if isinstance(q, torch.Tensor) and q.numel() > 0:
             step_vec = q[0:1]
             new_q = q[1:].detach().to("cpu").contiguous()
-            update_dict["embed.thinker_reply"] = new_q
+            update_dict.setdefault("embed", {})["thinker_reply"] = new_q
         else:
             # B) per-request provided decode vector (optional)
             dv = embed.get("decode")

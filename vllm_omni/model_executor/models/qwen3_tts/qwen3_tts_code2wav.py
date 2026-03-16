@@ -11,7 +11,6 @@ from vllm.config import VllmConfig
 from vllm.forward_context import get_forward_context, is_forward_context_available
 from vllm.logger import init_logger
 
-from vllm_omni.data_entry_keys import unflatten_payload
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 
 from .qwen3_tts_tokenizer import Qwen3TTSTokenizer
@@ -213,8 +212,7 @@ class Qwen3TTSCode2Wav(nn.Module):
             for i, info in enumerate(runtime_additional_information):
                 if i >= len(left_context_size):
                     break
-                p = unflatten_payload(info)
-                meta = p.get("meta", {})
+                meta = info.get("meta", {})
                 if "left_context_size" in meta:
                     left_context_size[i] = meta["left_context_size"]
         for i, req_ids in enumerate(request_ids_list):

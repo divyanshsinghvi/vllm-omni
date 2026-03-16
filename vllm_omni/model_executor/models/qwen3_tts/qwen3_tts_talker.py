@@ -555,7 +555,7 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
                 )
                 # Store full prompt embeddings + trailing queue on CPU for later chunks/steps.
                 prompt_embeds_cpu = full_prompt_embeds.detach().to("cpu").contiguous()
-                info_update: dict[str, Any] = {
+                info_update: OmniPayload = {
                     "embed": {
                         "prefill": prompt_embeds_cpu,
                         "tts_pad": tts_pad_embed.detach().to("cpu").contiguous(),

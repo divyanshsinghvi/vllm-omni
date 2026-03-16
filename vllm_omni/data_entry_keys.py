@@ -93,6 +93,7 @@ class OmniPayload(TypedDict, total=False):
     codes: Codes
     meta: OmniPayloadMeta
     model_outputs: list[torch.Tensor]
+    mtp_inputs: tuple[torch.Tensor, torch.Tensor]
 
 
 def flatten_payload(nested: OmniPayload) -> dict[str, Any]:

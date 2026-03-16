@@ -603,7 +603,7 @@ class Qwen3OmniMoeForConditionalGeneration(
             input_embeds = self.talker.embed_input_ids(input_ids)
 
         span_len = input_ids.shape[0]
-        update_dict: dict[str, Any] = {}
+        update_dict: OmniPayload = {}
         if span_len > 1:
             # prefill
             input_ids, input_embeds, update_dict = self.talker_preprocess_prefill(input_ids, input_embeds, payload)
@@ -685,7 +685,7 @@ class Qwen3OmniMoeForConditionalGeneration(
         meta: OmniPayloadMeta = payload.get("meta", {})
 
         # Containers to return per-request updates (e.g., code_predictor_hidden_per_request)
-        update_dict: dict[str, Any] = {}
+        update_dict: OmniPayload = {}
         # TODO(Peiqi): add voice_type support
         voice_type = self.voice_type
         start_index = meta.get("num_processed_tokens", 0)
@@ -789,7 +789,7 @@ class Qwen3OmniMoeForConditionalGeneration(
     def _talker_cache_thinker_decode_embeds(
         self,
         embed: Embeddings,
-        update_dict: dict[str, Any],
+        update_dict: OmniPayload,
     ) -> None:
         """
         Cache thinker embeds for decode stage.
@@ -930,7 +930,7 @@ class Qwen3OmniMoeForConditionalGeneration(
         return self.talker.text_projection(thinker_embed).to(device)
 
     def talker_preprocess_decode(
-        self, input_ids: torch.Tensor, input_embeds: torch.Tensor, update_dict: dict, payload: OmniPayload
+        self, input_ids: torch.Tensor, input_embeds: torch.Tensor, update_dict: OmniPayload, payload: OmniPayload
     ):
         hs = payload.get("hidden_states", {})
 

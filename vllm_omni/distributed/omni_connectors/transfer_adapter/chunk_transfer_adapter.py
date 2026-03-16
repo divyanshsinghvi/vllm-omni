@@ -8,8 +8,6 @@ from typing import Any
 import torch
 from vllm.v1.request import Request, RequestStatus
 
-from vllm_omni.data_entry_keys import flatten_payload
-
 from ..factory import OmniConnectorFactory
 from ..utils.config import ConnectorSpec
 from ..utils.logging import get_connector_logger
@@ -146,26 +144,28 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             # Update connector state
             self.get_req_chunk[req_id] += 1
 
+            meta = payload_data.get("meta", {})
             if self.model_mode == "ar":
                 self._update_request_payload(external_req_id, payload_data)
                 request.additional_information = payload_data
-                if payload_data.get("meta.finished"):
+                if meta.get("finished"):
                     self.finished_requests.add(req_id)
             else:
-                if payload_data.get("meta.finished"):
+                if meta.get("finished"):
                     self.finished_requests.add(req_id)
 
-                new_ids = payload_data.get("codes.audio", [])
+                new_ids = payload_data.get("codes", {}).get("audio", [])
                 request.prompt_token_ids = new_ids
-                # Pass additional fields (like meta.left_context_size) to the request
+                # Pass additional fields (like left_context_size) to the request
                 # Only pass chunk context metadata in additional_information
                 request.additional_information = {}
-                if "meta.left_context_size" in payload_data:
-                    request.additional_information["meta.left_context_size"] = payload_data["meta.left_context_size"]
+                left_ctx = meta.get("left_context_size")
+                if left_ctx is not None:
+                    request.additional_information.setdefault("meta", {})["left_context_size"] = left_ctx
                 request.num_computed_tokens = 0
 
                 # Empty chunk with more data expected: keep polling.
-                if not new_ids and not payload_data.get("meta.finished"):
+                if not new_ids and not meta.get("finished"):
                     return True
 
             # Mark as finished for consumption
@@ -187,16 +187,20 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             self.request_payload[req_id] = payload_data
             return payload_data
         origin_payload = self.request_payload[req_id]
-        override_keys = payload_data.pop("meta.override_keys", [])
-        for key, value in payload_data.items():
-            if key == "meta.finished":
+        override_keys = set(payload_data.get("meta", {}).pop("override_keys", []))
+        for type_key, sub_dict in payload_data.items():
+            if not isinstance(sub_dict, dict):
                 continue
-            elif key in override_keys:
-                payload_data[key] = value
-            elif isinstance(value, torch.Tensor) and key in origin_payload:
-                payload_data[key] = torch.cat([origin_payload[key], value], dim=0)
-            elif isinstance(value, list) and key in origin_payload:
-                payload_data[key] = origin_payload[key] + value
+            origin_sub = origin_payload.get(type_key, {})
+            for qual, value in sub_dict.items():
+                if type_key == "meta" and qual == "finished":
+                    continue
+                elif (type_key, qual) in override_keys:
+                    sub_dict[qual] = value
+                elif isinstance(value, torch.Tensor) and qual in origin_sub:
+                    sub_dict[qual] = torch.cat([origin_sub[qual], value], dim=0)
+                elif isinstance(value, list) and qual in origin_sub:
+                    sub_dict[qual] = origin_sub[qual] + value
 
         self.request_payload[req_id] = payload_data
         return payload_data
@@ -227,7 +231,6 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         if not payload_data:
             return
 
-        payload_data = flatten_payload(payload_data)
         success, size, metadata = self.connector.put(
             from_stage=str(stage_id),
             to_stage=str(next_stage_id),

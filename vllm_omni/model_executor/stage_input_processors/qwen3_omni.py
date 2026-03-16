@@ -152,7 +152,7 @@ def thinker2talker_async_chunk(
             "meta": {"finished": torch.tensor(is_finished, dtype=torch.bool)},
         }
         if output_token_ids:
-            talker_additional_info["meta"]["override_keys"] = ["embed.decode", "ids.output"]
+            talker_additional_info["meta"]["override_keys"] = [("embed", "decode"), ("ids", "output")]
             talker_additional_info["embed"] = {"decode": thinker_layers[0].detach().cpu()}
             talker_additional_info["ids"] = {"output": output_token_ids}
         else:

@@ -106,7 +106,11 @@ def test_load_poll(build_adapter):
     request = _req("req-1", RequestStatus.WAITING, external_req_id="external-1")
 
     adapter.load_async(request)
-    payload = {"codes.audio": [[1]], "hidden_states.output": torch.tensor([[2.0]]), "meta.finished": True}
+    payload = {
+        "codes": {"audio": [[1]]},
+        "hidden_states": {"output": torch.tensor([[2.0]])},
+        "meta": {"finished": True},
+    }
     connector.get.return_value = (payload, 16)
     adapter._poll_single_request(request)
 
@@ -134,15 +138,17 @@ def test_update_request_payload(build_adapter):
     adapter, _ = build_adapter()
 
     adapter._update_request_payload(
-        "ext", {"hidden_states.output": torch.tensor([[1.0]]), "codes.audio": [1], "meta.finished": False}
+        "ext",
+        {"hidden_states": {"output": torch.tensor([[1.0]])}, "codes": {"audio": [1]}, "meta": {"finished": False}},
     )
     merged = adapter._update_request_payload(
-        "ext", {"hidden_states.output": torch.tensor([[2.0]]), "codes.audio": [2], "meta.finished": True}
+        "ext",
+        {"hidden_states": {"output": torch.tensor([[2.0]])}, "codes": {"audio": [2]}, "meta": {"finished": True}},
     )
 
-    assert torch.equal(merged["hidden_states.output"], torch.tensor([[1.0], [2.0]]))
-    assert merged["codes.audio"] == [1, 2]
-    assert merged["meta.finished"] is True
+    assert torch.equal(merged["hidden_states"]["output"], torch.tensor([[1.0], [2.0]]))
+    assert merged["codes"]["audio"] == [1, 2]
+    assert merged["meta"]["finished"] is True
 
 
 def test_process_and_restore_queues(build_adapter):
@@ -304,7 +310,7 @@ def test_cleanup_after_poll_flow(build_adapter):
     adapter.load_async(request)
 
     adapter.request_ids_mapping["req-flow"] = "ext-flow"
-    payload = {"hidden_states.output": torch.tensor([[1.0]]), "meta.finished": True}
+    payload = {"hidden_states": {"output": torch.tensor([[1.0]])}, "meta": {"finished": True}}
     connector.get.return_value = (payload, 8)
     adapter._poll_single_request(request)
 

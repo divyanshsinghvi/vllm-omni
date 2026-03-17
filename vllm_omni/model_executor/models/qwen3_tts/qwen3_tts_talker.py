@@ -453,18 +453,20 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
         for info in info_dicts:
             if not isinstance(info, dict):
                 continue
-            ac = info.get("codes.audio")
+            codes = info.get("codes", {})
+            meta = info.get("meta", {})
+            ac = codes.get("audio")
             if isinstance(ac, torch.Tensor):
                 audio_codes_list.append(ac)
-                cs = info.get("meta.codec_streaming")
+                cs = meta.get("codec_streaming")
                 if isinstance(cs, bool):
                     codec_streaming_list.append(
                         torch.full((int(ac.shape[0]),), int(cs), dtype=torch.int8, device=ac.device)
                     )
-            ref_code = info.get("codes.ref")
+            ref_code = codes.get("ref")
             if isinstance(ref_code, torch.Tensor) and ref_code.numel() > 0:
                 ref_code_tensor = ref_code
-            ref_len = info.get("meta.ref_code_len")
+            ref_len = meta.get("ref_code_len")
             if ref_len is None:
                 continue
             if isinstance(ref_len, torch.Tensor):

@@ -189,7 +189,7 @@ class FishSpeechSlowARForConditionalGeneration(nn.Module):
         self.has_preprocess = True
         self.has_postprocess = True
         self.mtp_hidden_size = int(self.text_config.hidden_size)
-        self.talker_mtp_output_key = "audio_codes"
+        self.talker_mtp_output_key = ("codes", "audio")
 
         # Qwen3 transformer backbone.
         self.model = Qwen3Model(vllm_config=vllm_config, prefix=maybe_prefix(prefix, "model"))
@@ -319,7 +319,7 @@ class FishSpeechSlowARForConditionalGeneration(nn.Module):
         for info in info_dicts:
             if not isinstance(info, dict):
                 continue
-            ac = info.get("audio_codes")
+            ac = info.get("codes", {}).get("audio")
             if isinstance(ac, torch.Tensor):
                 audio_codes_list.append(ac)
 
@@ -382,7 +382,7 @@ class FishSpeechSlowARForConditionalGeneration(nn.Module):
                     device=dev,
                     dtype=torch.long,
                 )
-                info_update["audio_codes"] = zeros
+                info_update["codes"] = {"audio": zeros}
 
                 input_ids_out = input_ids.clone()
                 input_ids_out[:] = self._audio_pad_token_id
@@ -408,7 +408,7 @@ class FishSpeechSlowARForConditionalGeneration(nn.Module):
                     prompt_embeds,
                     {
                         "prefill_offset": offset + span_len,
-                        "audio_codes": zeros,
+                        "codes": {"audio": zeros},
                     },
                 )
 

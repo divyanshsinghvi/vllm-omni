@@ -76,7 +76,6 @@ class OmniPayloadMeta(TypedDict, total=False):
     visual_token_start_id: int
     visual_token_end_id: int
     gen_token_mask: torch.Tensor
-    generated_len: int
     omni_task: list[str]
     height: int
     width: int
@@ -92,6 +91,7 @@ class OmniPayload(TypedDict, total=False):
     ids: Ids
     codes: Codes
     meta: OmniPayloadMeta
+    generated_len: int
     model_outputs: list[torch.Tensor]
     mtp_inputs: tuple[torch.Tensor, torch.Tensor]
 

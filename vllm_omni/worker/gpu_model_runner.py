@@ -1301,6 +1301,8 @@ class OmniGPUModelRunner(GPUModelRunner):
         # update the inputs_embeds and code_predictor_codes
         code_predictor_codes_cpu = code_predictor_codes.detach().to("cpu").contiguous()
         out_key = getattr(self.model, "talker_mtp_output_key", ("codes", "audio"))
+        if not isinstance(out_key, tuple) or len(out_key) != 2:
+            raise TypeError(f"talker_mtp_output_key must be a 2-tuple, got {type(out_key).__name__}: {out_key!r}")
         for idx, req_id in enumerate(decode_req_ids):
             req_index = self.input_batch.req_ids.index(req_id)
             start_offset = int(self.query_start_loc.cpu[req_index])

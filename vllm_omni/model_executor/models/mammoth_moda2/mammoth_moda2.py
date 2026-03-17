@@ -619,7 +619,7 @@ class MammothModa2ARForConditionalGeneration(Qwen2_5_VLForConditionalGeneration)
             eol_token_id = meta["eol_token_id"][0]
             visual_start = meta["visual_token_start_id"][0]
             visual_end = meta["visual_token_end_id"][0]
-            generated_len = meta["generated_len"]
+            generated_len = runtime_info["generated_len"]
 
             row = logits[i]
             column_id = generated_len % (ar_width + 1)

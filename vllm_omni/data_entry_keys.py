@@ -93,5 +93,3 @@ class OmniPayload(TypedDict, total=False):
     generated_len: int
     model_outputs: list[torch.Tensor]
     mtp_inputs: tuple[torch.Tensor, torch.Tensor]
-
-

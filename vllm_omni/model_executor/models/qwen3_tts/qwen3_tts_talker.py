@@ -640,7 +640,7 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
 
         last_hidden = hs.get("last")
         if not isinstance(last_hidden, torch.Tensor):
-            raise RuntimeError("Missing `last_talker_hidden` in additional_information; postprocess must run.")
+            raise RuntimeError("Missing hidden_states['last'] in additional_information; postprocess must run.")
         past_hidden = last_hidden.to(device=input_ids.device, dtype=torch.bfloat16).reshape(1, -1)
 
         # Use OmniGPUModelRunner talker_mtp fast-path for residual codebooks and per-step inputs_embeds update.

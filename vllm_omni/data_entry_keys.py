@@ -16,12 +16,11 @@ Categories
 
 This module provides:
 - Structured ``TypedDict`` types for static type checking (``OmniPayload``)
-- ``flatten_payload``: convert nested ``OmniPayload`` to flat for serialization
 """
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import TypedDict
 
 import torch
 
@@ -96,22 +95,3 @@ class OmniPayload(TypedDict, total=False):
     mtp_inputs: tuple[torch.Tensor, torch.Tensor]
 
 
-def flatten_payload(nested: OmniPayload) -> dict[str, Any]:
-    """Convert a nested ``OmniPayload`` to a flat ``{type}.{qualifier}`` dict.
-
-    The ``hidden_states["layers"]`` sub-dict is expanded to individual
-    ``hidden_states.layer_N`` keys.
-    """
-    flat: dict[str, Any] = {}
-    for type_key in ("hidden_states", "embed", "ids", "codes", "meta"):
-        sub = nested.get(type_key)  # type: ignore[literal-required]
-        if sub is None:
-            continue
-        for qual, val in sub.items():
-            if qual == "layers" and type_key == "hidden_states":
-                if isinstance(val, dict):
-                    for layer_idx, tensor in val.items():
-                        flat[f"hidden_states.layer_{layer_idx}"] = tensor
-            else:
-                flat[f"{type_key}.{qual}"] = val
-    return flat

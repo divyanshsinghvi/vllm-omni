@@ -364,22 +364,7 @@ class OmniGPUModelRunner(GPUModelRunner):
                     logger.warning_once(
                         "additional_information on request data is deprecated, use model_intermediate_buffer"
                     )
-                    payload_info = new_req_data.additional_information
-                    info_dict = {}
-                    if isinstance(payload_info, dict):
-                        info_dict = payload_info
-                    else:
-                        from vllm_omni.engine import AdditionalInformationPayload
-
-                        if isinstance(payload_info, AdditionalInformationPayload):
-                            for k, entry in payload_info.entries.items():
-                                if entry.tensor_data is not None:
-                                    dt = np.dtype(getattr(entry, "tensor_dtype", "float32"))
-                                    arr = np.frombuffer(entry.tensor_data, dtype=dt)
-                                    arr = arr.reshape(entry.tensor_shape)
-                                    info_dict[k] = torch.from_numpy(arr.copy())
-                                else:
-                                    info_dict[k] = entry.list_data
+                    info_dict = self._resolve_additional_information(new_req_data.additional_information)
                     if info_dict:
                         self.model_intermediate_buffer[req_id] = info_dict
                         setattr(
@@ -929,8 +914,8 @@ class OmniGPUModelRunner(GPUModelRunner):
 
         Accepts:
         - ``dict`` – returned as-is.
-        - ``AdditionalInformationPayload`` (or duck-typed with
-          ``.entries``) – decoded entry-by-entry.
+        - ``AdditionalInformationPayload`` – decoded via
+          ``deserialize_payload`` back to nested ``OmniPayload``.
         - ``None`` – returns ``{}``.
         """
         if payload is None:
@@ -938,20 +923,12 @@ class OmniGPUModelRunner(GPUModelRunner):
         if isinstance(payload, dict):
             return payload
         try:
-            entries = getattr(payload, "entries", None)
-            if not isinstance(entries, dict):
-                return {}
-            info: dict[str, object] = {}
-            for k, entry in entries.items():
-                tensor_data = getattr(entry, "tensor_data", None)
-                if tensor_data is not None:
-                    dt = np.dtype(getattr(entry, "tensor_dtype", "float32"))
-                    arr = np.frombuffer(tensor_data, dtype=dt)
-                    arr = arr.reshape(getattr(entry, "tensor_shape", ()))
-                    info[k] = torch.from_numpy(arr.copy())
-                else:
-                    info[k] = getattr(entry, "list_data", None)
-            return info
+            from vllm_omni.data_entry_keys import deserialize_payload
+            from vllm_omni.engine import AdditionalInformationPayload
+
+            if isinstance(payload, AdditionalInformationPayload):
+                return deserialize_payload(payload)  # type: ignore[return-value]
+            return {}
         except Exception:
             logger.exception("Failed to decode additional_information payload")
         return {}

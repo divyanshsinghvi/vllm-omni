@@ -90,6 +90,7 @@ class OmniPayload(TypedDict, total=False):
     ids: Ids
     codes: Codes
     meta: OmniPayloadMeta
+    latent: torch.Tensor
     generated_len: int
     model_outputs: list[torch.Tensor]
     mtp_inputs: tuple[torch.Tensor, torch.Tensor]

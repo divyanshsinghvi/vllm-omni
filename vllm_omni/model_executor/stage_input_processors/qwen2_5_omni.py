@@ -1,6 +1,7 @@
 import torch
 from vllm.inputs import TextPrompt
 
+from vllm_omni.data_entry_keys import OmniPayload
 from vllm_omni.inputs.data import OmniTokensPrompt
 
 TALKER_CODEC_PAD_TOKEN_ID = 8292
@@ -34,8 +35,8 @@ def thinker2talker(
         prompt_token_ids = thinker_output.prompt_token_ids
         thinker_output_ids = output.token_ids
         prompt_token_ids_len = len(prompt_token_ids)
-        mm = output.multimodal_output
-        latent = mm["hidden_states"]["output"]
+        mm: OmniPayload = output.multimodal_output
+        latent = mm["latent"]
         thinker_hidden_states = latent.clone().detach().to(latent.device)
         additional_information = {
             "hidden_states": {

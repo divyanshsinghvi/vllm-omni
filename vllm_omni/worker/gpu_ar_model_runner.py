@@ -35,6 +35,7 @@ from vllm.v1.worker.gpu_model_runner import (
 from vllm.v1.worker.ubatch_utils import maybe_create_ubatch_slices
 from vllm.v1.worker.utils import is_residual_scattered_for_sp
 
+from vllm_omni.data_entry_keys import flatten_payload
 from vllm_omni.distributed.omni_connectors.kv_transfer_manager import OmniKVTransferManager
 from vllm_omni.outputs import OmniModelRunnerOutput
 from vllm_omni.worker.gpu_model_runner import OmniGPUModelRunner
@@ -616,7 +617,9 @@ class GPUARModelRunner(OmniGPUModelRunner):
                     else:
                         mm_payload[k] = v
                 payload.update(mm_payload)
-            pooler_output.append(payload)
+            # Flatten nested dicts to dotted keys so pooling_output
+            # stays dict[str, torch.Tensor] for msgspec serialization.
+            pooler_output.append(flatten_payload(payload))
         with record_function_or_nullcontext("gpu_model_runner: ModelRunnerOutput"):
             if self.routed_experts_initialized:
                 capturer = RoutedExpertsCapturer.get_instance()

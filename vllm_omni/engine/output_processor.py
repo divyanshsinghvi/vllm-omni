@@ -16,6 +16,7 @@ from vllm.v1.engine.output_processor import (
 from vllm.v1.engine.parallel_sampling import ParentRequest
 from vllm.v1.metrics.stats import IterationStats
 
+from vllm_omni.data_entry_keys import unflatten_payload
 from vllm_omni.outputs import OmniRequestOutput
 
 logger = init_logger(__name__)
@@ -56,6 +57,10 @@ class OmniRequestState(RequestState):
                 return x
 
             if isinstance(payload, dict):
+                # Unflatten dotted keys (e.g. "codes.audio") back to nested
+                # dicts since pooling_output is flattened for msgspec transport.
+                payload = unflatten_payload(payload)
+
                 incoming: dict[str, Any] = {}
                 target_key = self.mm_type or "hidden"
 

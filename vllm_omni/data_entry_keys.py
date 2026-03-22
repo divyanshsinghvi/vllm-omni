@@ -105,6 +105,51 @@ class OmniPayload(TypedDict, total=False):
 # ── Keys whose values are nested dicts (TypedDict sub-categories) ──
 _NESTED_KEYS = frozenset({"hidden_states", "embed", "ids", "codes", "meta"})
 
+
+def flatten_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Flatten a nested ``OmniPayload`` to dotted keys.
+
+    Nested sub-dicts under ``_NESTED_KEYS`` are expanded:
+    ``{"codes": {"audio": tensor}}`` → ``{"codes.audio": tensor}``.
+    ``hidden_states["layers"]`` is expanded to ``hidden_states.layer_N``.
+    Top-level values are kept as-is.
+    """
+    flat: dict[str, Any] = {}
+    for key, value in payload.items():
+        if key in _NESTED_KEYS and isinstance(value, dict):
+            for qual, val in value.items():
+                if qual == "layers" and key == "hidden_states" and isinstance(val, dict):
+                    for layer_idx, tensor in val.items():
+                        flat[f"hidden_states.layer_{layer_idx}"] = tensor
+                else:
+                    flat[f"{key}.{qual}"] = val
+        else:
+            flat[key] = value
+    return flat
+
+
+def unflatten_payload(flat: dict[str, Any]) -> dict[str, Any]:
+    """Unflatten dotted keys back to nested dicts.
+
+    Reverse of :func:`flatten_payload`.
+    ``hidden_states.layer_N`` keys are collected into ``hidden_states.layers``.
+    """
+    result: dict[str, Any] = {}
+    for key, value in flat.items():
+        if "." in key:
+            type_key, qualifier = key.split(".", 1)
+            sub = result.setdefault(type_key, {})
+            if type_key == "hidden_states" and qualifier.startswith("layer_"):
+                layers = sub.setdefault("layers", {})
+                layer_idx = int(qualifier[len("layer_") :])
+                layers[layer_idx] = value
+            else:
+                sub[qualifier] = value
+        else:
+            result[key] = value
+    return result
+
+
 # ── dtype helpers ──
 _DTYPE_TO_NAME: dict[torch.dtype, str] = {
     torch.float32: "float32",
@@ -147,35 +192,25 @@ def serialize_payload(
 ) -> AdditionalInformationPayload | None:
     """Serialize an ``OmniPayload`` for EngineCore transport.
 
-    Nested sub-dicts are flattened to dotted keys (e.g.
-    ``hidden_states.output``) so the wire format stays flat.
-    ``hidden_states.layers`` is expanded to ``hidden_states.layer_N``.
+    Uses :func:`flatten_payload` to produce dotted keys, then converts
+    each value to an ``AdditionalInformationEntry``.
     """
     from vllm_omni.engine import (
         AdditionalInformationEntry,
         AdditionalInformationPayload,
     )
 
+    flat = flatten_payload(payload)
     entries: dict[str, AdditionalInformationEntry] = {}
 
-    for key, value in payload.items():
-        if key in _NESTED_KEYS and isinstance(value, dict):
-            for qual, val in value.items():
-                # Special-case: layers dict keyed by int
-                if qual == "layers" and key == "hidden_states" and isinstance(val, dict):
-                    for layer_idx, tensor in val.items():
-                        entries[f"hidden_states.layer_{layer_idx}"] = _serialize_tensor(tensor)
-                elif isinstance(val, torch.Tensor):
-                    entries[f"{key}.{qual}"] = _serialize_tensor(val)
-                elif isinstance(val, list):
-                    entries[f"{key}.{qual}"] = AdditionalInformationEntry(list_data=val)
-                else:
-                    # Scalars (bool, int, etc.) — wrap in a single-element list
-                    entries[f"{key}.{qual}"] = AdditionalInformationEntry(list_data=[val])
-        elif isinstance(value, torch.Tensor):
+    for key, value in flat.items():
+        if isinstance(value, torch.Tensor):
             entries[key] = _serialize_tensor(value)
         elif isinstance(value, list):
             entries[key] = AdditionalInformationEntry(list_data=value)
+        elif value is not None:
+            # Scalars (bool, int, etc.) — wrap in a single-element list
+            entries[key] = AdditionalInformationEntry(list_data=[value])
 
     return AdditionalInformationPayload(entries=entries) if entries else None
 
@@ -185,35 +220,19 @@ def deserialize_payload(
 ) -> OmniPayload:
     """Deserialize an ``AdditionalInformationPayload`` back to ``OmniPayload``.
 
-    Dotted keys are unflattened into nested dicts.
-    ``hidden_states.layer_N`` keys are collected into ``hidden_states.layers``.
+    Decodes entries to tensors/lists, then uses :func:`unflatten_payload`
+    to reconstruct the nested structure.
     """
-    result: dict[str, Any] = {}
+    flat: dict[str, Any] = {}
 
     for key, entry in wire.entries.items():
-        # Reconstruct value
         if entry.tensor_data is not None:
-            val: Any = _deserialize_tensor(entry)
+            flat[key] = _deserialize_tensor(entry)
         elif entry.list_data is not None:
             val = entry.list_data
-        else:
-            continue
+            # Unwrap single-element scalar lists from meta keys
+            if key.startswith("meta.") and isinstance(val, list) and len(val) == 1:
+                val = val[0]
+            flat[key] = val
 
-        # Dotted key → nested dict
-        if "." in key:
-            type_key, qualifier = key.split(".", 1)
-            sub = result.setdefault(type_key, {})
-            # hidden_states.layer_N → layers[N]
-            if type_key == "hidden_states" and qualifier.startswith("layer_"):
-                layers = sub.setdefault("layers", {})
-                layer_idx = int(qualifier[len("layer_") :])
-                layers[layer_idx] = val
-            else:
-                # Unwrap single-element scalar lists from meta
-                if type_key == "meta" and isinstance(val, list) and len(val) == 1:
-                    val = val[0]
-                sub[qualifier] = val
-        else:
-            result[key] = val
-
-    return result  # type: ignore[return-value]
+    return unflatten_payload(flat)  # type: ignore[return-value]

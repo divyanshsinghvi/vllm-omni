@@ -1051,8 +1051,14 @@ class OmniGPUModelRunner(GPUModelRunner):
                     s, e = start_offset, start_offset + sched_tokens
                     # only consider to store data into update dict.
                     hidden_states_slice = hidden_states[s:e]
+                    # Exclude 'hidden_states' from kwargs to avoid clash with
+                    # the positional arg. The buffer entry must be preserved
+                    # because preprocess reads hidden_states['last'] from it.
+                    # TODO: pass req_infos as a single payload arg instead of **unpacking
+                    # to avoid key collisions with positional args.
+                    postprocess_kwargs = {k: v for k, v in req_infos.items() if k != "hidden_states"}
                     update_dict = self.model.postprocess(
-                        hidden_states_slice, multimodal_outputs=multimodal_outputs, **req_infos
+                        hidden_states_slice, multimodal_outputs=multimodal_outputs, **postprocess_kwargs
                     )
                     self._update_intermediate_buffer(req_id, update_dict)
         except Exception as e:

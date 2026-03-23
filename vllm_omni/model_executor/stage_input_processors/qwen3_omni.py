@@ -112,13 +112,13 @@ def thinker2talker_async_chunk(
         prompt_token_ids = _ensure_list(prompt_token_ids)
         payload: OmniPayload = {
             "embed": {
-                "prefill": thinker_layers["0"].detach().cpu(),
+                "prefill": thinker_layers[0].detach().cpu(),
                 # Provide thinker-side TTS token embeddings for talker projection
                 "tts_bos": thinker_embed["tts_bos"].detach().cpu(),
                 "tts_eos": thinker_embed["tts_eos"].detach().cpu(),
                 "tts_pad": thinker_embed["tts_pad"].detach().cpu(),
             },
-            "hidden_states": {"output": thinker_layers["24"].detach().cpu()},
+            "hidden_states": {"output": thinker_layers[24].detach().cpu()},
             "ids": {"all": all_token_ids, "prompt": prompt_token_ids},
             "meta": {"finished": torch.tensor(is_finished, dtype=torch.bool)},
         }
@@ -153,12 +153,12 @@ def thinker2talker_async_chunk(
         }
         if output_token_ids:
             talker_additional_info["meta"]["override_keys"] = [("embed", "decode"), ("ids", "output")]
-            talker_additional_info["embed"] = {"decode": thinker_layers["0"].detach().cpu()}
+            talker_additional_info["embed"] = {"decode": thinker_layers[0].detach().cpu()}
             talker_additional_info["ids"] = {"output": output_token_ids}
         else:
             # When prefilling a chunked thinker, thinker_hidden_states needs to be updated.
-            talker_additional_info["embed"] = {"prefill": thinker_layers["0"].detach().cpu()}
-            talker_additional_info["hidden_states"] = {"output": thinker_layers["24"].detach().cpu()}
+            talker_additional_info["embed"] = {"prefill": thinker_layers[0].detach().cpu()}
+            talker_additional_info["hidden_states"] = {"output": thinker_layers[24].detach().cpu()}
     return talker_additional_info
 
 
@@ -200,13 +200,13 @@ def thinker2talker(
 
         payload: OmniPayload = {
             "embed": {
-                "prefill": mm_layers["0"].detach().to(device=device, dtype=torch.float),
+                "prefill": mm_layers[0].detach().to(device=device, dtype=torch.float),
                 "tts_bos": mm_embed["tts_bos"].detach().to(device=device, dtype=torch.float),
                 "tts_eos": mm_embed["tts_eos"].detach().to(device=device, dtype=torch.float),
                 "tts_pad": mm_embed["tts_pad"].detach().to(device=device, dtype=torch.float),
             },
             "hidden_states": {
-                "output": mm_layers["24"].detach().to(device=device, dtype=torch.float),
+                "output": mm_layers[24].detach().to(device=device, dtype=torch.float),
             },
             "ids": {
                 "all": thinker_output.prompt_token_ids + output.token_ids,

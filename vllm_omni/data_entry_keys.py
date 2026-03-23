@@ -41,7 +41,7 @@ class HiddenStates(TypedDict, total=False):
     output: torch.Tensor
     trailing_text: torch.Tensor
     last: torch.Tensor
-    layers: dict[str, torch.Tensor]
+    layers: dict[int, torch.Tensor]
 
 
 class Embeddings(TypedDict, total=False):
@@ -111,7 +111,7 @@ def flatten_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     Nested sub-dicts under ``_NESTED_KEYS`` are expanded:
     ``{"codes": {"audio": tensor}}`` → ``{"codes.audio": tensor}``.
-    ``hidden_states["layers"]`` is expanded to ``hidden_states.layer.N``.
+    ``hidden_states["layers"]`` is expanded to ``hidden_states.layer_N``.
     Top-level values are kept as-is.
     """
     flat: dict[str, Any] = {}
@@ -120,7 +120,7 @@ def flatten_payload(payload: dict[str, Any]) -> dict[str, Any]:
             for qual, val in value.items():
                 if qual == "layers" and key == "hidden_states" and isinstance(val, dict):
                     for layer_idx, tensor in val.items():
-                        flat[f"hidden_states.layer.{layer_idx}"] = tensor
+                        flat[f"hidden_states.layer_{layer_idx}"] = tensor
                 else:
                     flat[f"{key}.{qual}"] = val
         else:
@@ -132,16 +132,16 @@ def unflatten_payload(flat: dict[str, Any]) -> dict[str, Any]:
     """Unflatten dotted keys back to nested dicts.
 
     Reverse of :func:`flatten_payload`.
-    ``hidden_states.layer.N`` keys are collected into ``hidden_states.layers``.
+    ``hidden_states.layer_N`` keys are collected into ``hidden_states.layers``.
     """
     result: dict[str, Any] = {}
     for key, value in flat.items():
         if "." in key:
             type_key, qualifier = key.split(".", 1)
             sub = result.setdefault(type_key, {})
-            if type_key == "hidden_states" and qualifier.startswith("layer."):
+            if type_key == "hidden_states" and qualifier.startswith("layer_"):
                 layers = sub.setdefault("layers", {})
-                layer_idx = qualifier[len("layer."):]
+                layer_idx = int(qualifier[len("layer_") :])
                 layers[layer_idx] = value
             else:
                 sub[qualifier] = value

@@ -65,7 +65,6 @@ class ModelArgs:
             hidden_dim = 4 * self.dim
             n_hidden = int(2 * hidden_dim / 3)
             self.intermediate_size = find_multiple(n_hidden, 256)
-        # self.head_dim = self.dim // self.n_head
 
 
 class KVCache(nn.Module):

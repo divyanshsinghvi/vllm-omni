@@ -3,6 +3,9 @@
 
 import torch
 from torch import nn
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 class AttrDict(dict):
@@ -118,7 +121,7 @@ def load_checkpoint(
     state = torch.load(path, map_location="cpu")
     params = state["net"]
     if load_ema and "ema" in state:
-        print("Loading EMA")
+        logger.info("Loading EMA")
         for key in model:
             i = 0
             for param_name in params[key]:
@@ -140,8 +143,8 @@ def load_checkpoint(
             }
             skipped_keys = set(params[key].keys()) - set(filtered_state_dict.keys())
             if skipped_keys:
-                print(f"Warning: Skipped loading some keys due to shape mismatch: {skipped_keys}")
-            print(f"{key} loaded")
+                logger.warning("Skipped loading some keys due to shape mismatch: %s", skipped_keys)
+            logger.debug("%s loaded", key)
             model[key].load_state_dict(filtered_state_dict, strict=False)
     _ = [model[key].eval() for key in model]
 
@@ -169,7 +172,7 @@ def load_checkpoint2(
     state = torch.load(path, map_location="cpu")
     params = state["net"]
     if load_ema and "ema" in state:
-        print("Loading EMA")
+        logger.info("Loading EMA")
         for key in model.models:
             i = 0
             for param_name in params[key]:
@@ -191,8 +194,8 @@ def load_checkpoint2(
             }
             skipped_keys = set(params[key].keys()) - set(filtered_state_dict.keys())
             if skipped_keys:
-                print(f"Warning: Skipped loading some keys due to shape mismatch: {skipped_keys}")
-            print(f"{key} loaded")
+                logger.warning("Skipped loading some keys due to shape mismatch: %s", skipped_keys)
+            logger.debug("%s loaded", key)
             model.models[key].load_state_dict(filtered_state_dict, strict=False)
     model.eval()
 

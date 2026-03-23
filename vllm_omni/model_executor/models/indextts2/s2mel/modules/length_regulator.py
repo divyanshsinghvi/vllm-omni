@@ -21,7 +21,6 @@ def f0_to_coarse(f0, f0_bin):
     a = (f0_bin - 2) / (f0_mel_max - f0_mel_min)
     b = f0_mel_min * a - 1.0
     f0_mel = torch.where(f0_mel > 0, f0_mel * a - b, f0_mel)
-    # torch.clip_(f0_mel, min=1., max=float(f0_bin - 1))
     f0_coarse = torch.round(f0_mel).long()
     f0_coarse = f0_coarse * (f0_coarse > 0)
     f0_coarse = f0_coarse + ((f0_coarse < 1) * 1)

@@ -40,10 +40,61 @@ class OmniRequestState(RequestState):
         self.mm_type: str | None = None
         self.mm_accumulated: dict[str, Any] | None = None
 
+    _dbg_add_mm_call_count: int = 0
+
     def add_multimodal_tensor(self, payload: Any | None, mm_type: str | None) -> None:
         if payload is None:
             return
         try:
+            # #region agent log
+            OmniRequestState._dbg_add_mm_call_count += 1
+            _cc = OmniRequestState._dbg_add_mm_call_count
+
+            def _dbg_shapes(d, prefix=""):
+                r = {}
+                if isinstance(d, dict):
+                    for k2, v2 in d.items():
+                        fk = f"{prefix}{k2}"
+                        if isinstance(v2, torch.Tensor):
+                            r[fk] = list(v2.shape)
+                        elif isinstance(v2, dict):
+                            r.update(_dbg_shapes(v2, fk + "."))
+                        elif isinstance(v2, list):
+                            r[fk] = f"list[{len(v2)}]"
+                        else:
+                            r[fk] = str(type(v2).__name__)
+                return r
+
+            try:
+                import json
+                import time
+
+                _acc_shapes = _dbg_shapes(self.mm_accumulated) if self.mm_accumulated else {}
+                _pay_shapes = (
+                    _dbg_shapes(payload) if isinstance(payload, dict) else {"type": str(type(payload).__name__)}
+                )
+                with open("/app/feature/.cursor/debug-ee97b8.log", "a") as _f:
+                    _f.write(
+                        json.dumps(
+                            {
+                                "sessionId": "ee97b8",
+                                "hypothesisId": "A",
+                                "runId": "post-fix",
+                                "location": "output_processor.py:add_multimodal_tensor",
+                                "message": f"add_mm call #{_cc}",
+                                "data": {
+                                    "call_count": _cc,
+                                    "incoming_shapes": _pay_shapes,
+                                    "accumulated_shapes": _acc_shapes,
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            }
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # #endregion
             if mm_type:
                 self.mm_type = (mm_type or "").lower()
 
@@ -57,27 +108,21 @@ class OmniRequestState(RequestState):
                 return x
 
             if isinstance(payload, dict):
-                # Unflatten dotted keys (e.g. "codes.audio") back to nested
-                # dicts since pooling_output is flattened for msgspec transport.
-                payload = unflatten_payload(payload)
+                # Keep payload flat (dotted keys like "hidden_states.layer_0")
+                # during accumulation so that all values are tensors/scalars and
+                # the merge logic below works correctly.  Unflatten happens
+                # later in _consolidate_multimodal_tensors after concatenation.
 
                 incoming: dict[str, Any] = {}
                 target_key = self.mm_type or "hidden"
 
                 for k, v in payload.items():
-                    # Normalize producer keys to the modality name.
-                    # AR runners produce {"hidden": ...} and generation
-                    # runners produce {"model_outputs": ...}; remap both
-                    # to the semantic modality key (e.g. "audio", "latent").
                     if k == "model_outputs":
                         k = target_key
                     elif k == "hidden" and target_key != "hidden":
                         k = target_key
 
-                    if isinstance(v, dict):
-                        incoming[k] = {str(sk): _to_cpu(sv) for sk, sv in v.items()}
-                    else:
-                        incoming[k] = _to_cpu(v)
+                    incoming[k] = _to_cpu(v)
             else:
                 key = self.mm_type or "hidden"
                 incoming = {key: _to_cpu(payload)}
@@ -85,20 +130,16 @@ class OmniRequestState(RequestState):
             if self.mm_accumulated is None:
                 self.mm_accumulated = incoming
             else:
-                # Merge keys; accumulate tensors in lists for deferred concatenation
                 for k, v in incoming.items():
                     if k not in self.mm_accumulated:
                         self.mm_accumulated[k] = v
                     else:
                         existing = self.mm_accumulated[k]
                         if isinstance(v, torch.Tensor) and isinstance(existing, torch.Tensor):
-                            # Use list accumulation to avoid O(n²) repeated concatenation
                             self.mm_accumulated[k] = [existing, v]
                         elif isinstance(v, torch.Tensor) and isinstance(existing, list):
-                            # Append to existing list
                             existing.append(v)
                         elif isinstance(v, dict) and isinstance(existing, dict):
-                            # Merge nested dicts with list accumulation for tensors
                             for sk, sv in v.items():
                                 if sk not in existing:
                                     existing[sk] = sv
@@ -144,6 +185,13 @@ class OmniRequestState(RequestState):
                                 v[sk] = sv[-1]
         except Exception:
             logger.exception("Error consolidating multimodal tensors")
+
+        # Restore nested structure from flat dotted keys now that all tensor
+        # lists have been concatenated into single tensors.
+        try:
+            self.mm_accumulated = unflatten_payload(self.mm_accumulated)
+        except Exception:
+            logger.exception("Error unflattening consolidated multimodal tensors")
 
     # Override: do not route to pooling-only path; always create completion
     # outputs, and attach pooling_result into the CompletionOutput.

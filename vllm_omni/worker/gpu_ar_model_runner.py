@@ -565,6 +565,9 @@ class GPUARModelRunner(OmniGPUModelRunner):
         # redundant D2H transfers when gpu_resident_buffer_keys keeps them on GPU.
         mm_cpu: dict[str, object] = {}
         if isinstance(multimodal_outputs, dict) and multimodal_outputs:
+            # Flatten nested OmniPayload (e.g. hidden_states.layers.{0: T})
+            # to dotted top-level keys so the loop below can handle them.
+            multimodal_outputs = flatten_payload(multimodal_outputs)
             for k, v in multimodal_outputs.items():
                 try:
                     if isinstance(v, torch.Tensor) and v.shape[0] == hidden_states_cpu.shape[0]:

@@ -684,6 +684,50 @@ class Qwen3OmniMoeForConditionalGeneration(
         hs: HiddenStates = payload.get("hidden_states", {})
         embed: Embeddings = payload.get("embed", {})
         ids: Ids = payload.get("ids", {})
+        # #region agent log
+        try:
+            import json
+            import time
+
+            def _sp(d, prefix=""):
+                r = {}
+                if isinstance(d, dict):
+                    for k2, v2 in d.items():
+                        fk = f"{prefix}{k2}"
+                        if hasattr(v2, "shape"):
+                            r[fk] = list(v2.shape)
+                        elif isinstance(v2, dict):
+                            r.update(_sp(v2, fk + "."))
+                        elif isinstance(v2, list):
+                            r[fk] = f"list[{len(v2)}]"
+                        else:
+                            r[fk] = str(type(v2).__name__)[:30]
+                return r
+
+            with open("/app/feature/.cursor/debug-ee97b8.log", "a") as _f:
+                _f.write(
+                    json.dumps(
+                        {
+                            "sessionId": "ee97b8",
+                            "hypothesisId": "C",
+                            "runId": "run1",
+                            "location": "qwen3_omni.py:talker_preprocess_prefill",
+                            "message": "payload received at talker",
+                            "data": {
+                                "hs_shapes": _sp(hs),
+                                "embed_shapes": _sp(embed),
+                                "ids_shapes": _sp(ids),
+                                "input_ids_shape": list(input_ids.shape),
+                                "input_embeds_shape": list(input_embeds.shape),
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         meta: OmniPayloadMeta = payload.get("meta", {})
 
         # Containers to return per-request updates (e.g., code_predictor_hidden_per_request)
@@ -971,6 +1015,35 @@ class Qwen3OmniMoeForConditionalGeneration(
         return last_talker_hidden, text_step, update_dict
 
     def _get_talker_user_parts(self, im_start_index, segment_end_index, multimodal_mask, thinker_hidden, thinker_embed):
+        # #region agent log
+        try:
+            import json
+            import time
+
+            with open("/app/feature/.cursor/debug-ee97b8.log", "a") as _f:
+                _f.write(
+                    json.dumps(
+                        {
+                            "sessionId": "ee97b8",
+                            "hypothesisId": "E",
+                            "runId": "run1",
+                            "location": "qwen3_omni.py:_get_talker_user_parts",
+                            "message": "entry shapes",
+                            "data": {
+                                "im_start_index": im_start_index,
+                                "segment_end_index": segment_end_index,
+                                "thinker_hidden_shape": list(thinker_hidden.shape),
+                                "thinker_embed_shape": list(thinker_embed.shape),
+                                "multimodal_mask_shape": list(multimodal_mask.shape),
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         user_talker_part = torch.empty(
             (segment_end_index - im_start_index, self.config.talker_config.text_config.hidden_size),
             device=thinker_hidden.device,

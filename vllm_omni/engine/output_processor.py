@@ -40,61 +40,10 @@ class OmniRequestState(RequestState):
         self.mm_type: str | None = None
         self.mm_accumulated: dict[str, Any] | None = None
 
-    _dbg_add_mm_call_count: int = 0
-
     def add_multimodal_tensor(self, payload: Any | None, mm_type: str | None) -> None:
         if payload is None:
             return
         try:
-            # #region agent log
-            OmniRequestState._dbg_add_mm_call_count += 1
-            _cc = OmniRequestState._dbg_add_mm_call_count
-
-            def _dbg_shapes(d, prefix=""):
-                r = {}
-                if isinstance(d, dict):
-                    for k2, v2 in d.items():
-                        fk = f"{prefix}{k2}"
-                        if isinstance(v2, torch.Tensor):
-                            r[fk] = list(v2.shape)
-                        elif isinstance(v2, dict):
-                            r.update(_dbg_shapes(v2, fk + "."))
-                        elif isinstance(v2, list):
-                            r[fk] = f"list[{len(v2)}]"
-                        else:
-                            r[fk] = str(type(v2).__name__)
-                return r
-
-            try:
-                import json
-                import time
-
-                _acc_shapes = _dbg_shapes(self.mm_accumulated) if self.mm_accumulated else {}
-                _pay_shapes = (
-                    _dbg_shapes(payload) if isinstance(payload, dict) else {"type": str(type(payload).__name__)}
-                )
-                with open("/app/feature/.cursor/debug-ee97b8.log", "a") as _f:
-                    _f.write(
-                        json.dumps(
-                            {
-                                "sessionId": "ee97b8",
-                                "hypothesisId": "A",
-                                "runId": "post-fix",
-                                "location": "output_processor.py:add_multimodal_tensor",
-                                "message": f"add_mm call #{_cc}",
-                                "data": {
-                                    "call_count": _cc,
-                                    "incoming_shapes": _pay_shapes,
-                                    "accumulated_shapes": _acc_shapes,
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            }
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # #endregion
             if mm_type:
                 self.mm_type = (mm_type or "").lower()
 

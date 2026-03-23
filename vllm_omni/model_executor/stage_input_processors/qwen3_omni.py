@@ -198,40 +198,6 @@ def thinker2talker(
         mm_layers = mm_hs.get("layers", {})
         mm_embed = mm.get("embed", {})
 
-        # #region agent log
-        try:
-            import json
-            import time
-
-            _l0s = list(mm_layers[0].shape) if 0 in mm_layers else "MISSING"
-            _l24s = list(mm_layers[24].shape) if 24 in mm_layers else "MISSING"
-            _keys = list(mm_layers.keys())
-            _embed_keys = list(mm_embed.keys())
-            with open("/app/feature/.cursor/debug-ee97b8.log", "a") as _f:
-                _f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "ee97b8",
-                            "hypothesisId": "B",
-                            "runId": "run1",
-                            "location": "stage_input_processors/qwen3_omni.py:thinker2talker",
-                            "message": "mm_layers shapes before payload",
-                            "data": {
-                                "layer_0_shape": _l0s,
-                                "layer_24_shape": _l24s,
-                                "layer_keys": str(_keys),
-                                "embed_keys": str(_embed_keys),
-                                "prompt_token_ids_len": len(thinker_output.prompt_token_ids),
-                                "output_token_ids_len": len(output.token_ids),
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         payload: OmniPayload = {
             "embed": {
                 "prefill": mm_layers["0"].detach().to(device=device, dtype=torch.float),

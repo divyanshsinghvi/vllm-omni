@@ -79,7 +79,7 @@ def run_batch(args) -> None:
 
     print(f"Sending batch of {len(items)} item(s) to {args.api_base}")
     if args.ref_audio:
-        print(f"Voice cloning mode — ref_audio applied to all items")
+        print("Voice cloning mode — ref_audio applied to all items")
 
     url = f"{args.api_base}/v1/audio/speech/batch"
     headers = {

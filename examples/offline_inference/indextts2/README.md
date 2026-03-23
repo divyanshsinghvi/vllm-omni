@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- SPDX-FileCopyrightText: Copyright contributors to the vLLM project -->
+
 # IndexTTS2 Text-to-Speech
 
 IndexTTS2 is a two-stage TTS model that generates high-quality speech from text using a GPT-based autoregressive model followed by a speech-to-mel diffusion model.

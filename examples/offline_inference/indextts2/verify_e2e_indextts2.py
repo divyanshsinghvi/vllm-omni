@@ -123,21 +123,19 @@ def run_e2e():
     outputs = omni.generate(prompts, sampling_params_list=sampling_params_list[:2])
 
     print(f"Received {len(outputs)} outputs.")
-    for i, stage_outputs in enumerate(outputs):
-        request_outputs = stage_outputs.request_output or []
-        for j, output in enumerate(request_outputs):
-            mm = output.outputs[0].multimodal_output
-            audio = mm["audio"]
-            sample_rate = 22050
-            print(f"Audio shape: {audio.shape}")
+    for i, output in enumerate(outputs):
+        mm = output.outputs[0].multimodal_output
+        audio = mm["audio"]
+        sample_rate = 22050
+        print(f"Audio shape: {audio.shape}")
 
-            audio_numpy = audio.float().detach().cpu().numpy()
-            if audio_numpy.ndim > 1:
-                audio_numpy = audio_numpy.flatten()
+        audio_numpy = audio.float().detach().cpu().numpy()
+        if audio_numpy.ndim > 1:
+            audio_numpy = audio_numpy.flatten()
 
-            out_path = f"output_{i}_{j}.wav"
-            sf.write(out_path, audio_numpy, samplerate=sample_rate, format="WAV")
-            print(f"Saved audio to {out_path}")
+        out_path = f"output_{i}.wav"
+        sf.write(out_path, audio_numpy, samplerate=sample_rate, format="WAV")
+        print(f"Saved audio to {out_path}")
 
     omni.close()
     print("Done!")

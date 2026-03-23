@@ -131,9 +131,9 @@ class IndexTTS2Config(PretrainedConfig):
         self.gpt_checkpoint = "gpt.pth"
         self.w2v_stat = "wav2vec2bert_stats.pt"
         self.s2mel_checkpoint = "s2mel.pth"
-        self.emo_matrix = "feat2.pt "
+        self.emo_matrix = "feat2.pt"
         self.spk_matrix = "feat1.pt"
         self.emo_num = [3, 17, 2, 8, 4, 5, 10, 24]
         self.qwen_emo_path = "qwen0.6bemo4-merge/"
         self.vocoder = {"type": "bigvgan", "name": "nvidia/bigvgan_v2_22khz_80band_256x"}
-        self.version: 2.0
+        self.version = 2.0

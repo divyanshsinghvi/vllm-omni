@@ -110,17 +110,10 @@ def run_e2e():
         max_tokens=4096,
         detokenize=False,
     )
-    vocoder_sampling = SamplingParams(
-        temperature=0.0,
-        top_p=1.0,
-        top_k=-1,
-        max_tokens=4096,
-        detokenize=True,
-    )
 
-    sampling_params_list = [gpt_sampling, s2mel_sampling, vocoder_sampling]
+    sampling_params_list = [gpt_sampling, s2mel_sampling]
 
-    outputs = omni.generate(prompts, sampling_params_list=sampling_params_list[:2])
+    outputs = omni.generate(prompts, sampling_params_list=sampling_params_list)
 
     print(f"Received {len(outputs)} outputs.")
     for i, output in enumerate(outputs):

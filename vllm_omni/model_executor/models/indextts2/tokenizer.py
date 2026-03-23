@@ -6,17 +6,6 @@ import os
 from transformers import PreTrainedTokenizer
 from vllm.logger import init_logger
 
-# # Suppress verbose logging from tn/WeTextProcessing
-# # The tn library creates loggers with INFO level and adds handlers each time,
-# # so we use a filter that can't be overridden
-# class _BlockAllFilter(logging.Filter):
-#     def filter(self, record):
-#         return False
-# # Pre-configure wetext loggers BEFORE any tn imports
-# for _name in ["wetext-zh_normalizer", "wetext-en_normalizer"]:
-#     _logger = logging.getLogger(_name)
-#     _logger.addFilter(_BlockAllFilter())
-#     _logger.propagate = False  # Prevent propagation to root logger
 from vllm_omni.model_executor.models.indextts2.utils.front import TextNormalizer, TextTokenizer
 
 logger = init_logger(__name__)

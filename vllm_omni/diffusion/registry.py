@@ -157,6 +157,16 @@ _DIFFUSION_MODELS = {
         "pipeline_hunyuan_video_1_5_i2v",
         "HunyuanVideo15I2VPipeline",
     ),
+    "MicroWorldT2WPipeline": (
+        "micro_world",
+        "pipeline_micro_world_t2w",
+        "MicroWorldT2WPipeline",
+    ),
+    "MicroWorldI2WPipeline": (
+        "micro_world",
+        "pipeline_micro_world_i2w",
+        "MicroWorldI2WPipeline",
+    ),
 }
 
 
@@ -334,6 +344,8 @@ _DIFFUSION_POST_PROCESS_FUNCS = {
     "Flux2Pipeline": "get_flux2_post_process_func",
     "HunyuanVideo15Pipeline": "get_hunyuan_video_15_post_process_func",
     "HunyuanVideo15ImageToVideoPipeline": "get_hunyuan_video_15_i2v_post_process_func",
+    "MicroWorldT2WPipeline": "get_micro_world_t2w_post_process_func",
+    "MicroWorldI2WPipeline": "get_micro_world_i2w_post_process_func",
 }
 
 _DIFFUSION_PRE_PROCESS_FUNCS = {
@@ -351,6 +363,8 @@ _DIFFUSION_PRE_PROCESS_FUNCS = {
     "HeliosPipeline": "get_helios_pre_process_func",
     "HeliosPyramidPipeline": "get_helios_pre_process_func",
     "HunyuanVideo15ImageToVideoPipeline": "get_hunyuan_video_15_i2v_pre_process_func",
+    "MicroWorldT2WPipeline": "get_micro_world_t2w_pre_process_func",
+    "MicroWorldI2WPipeline": "get_micro_world_i2w_pre_process_func",
 }
 
 

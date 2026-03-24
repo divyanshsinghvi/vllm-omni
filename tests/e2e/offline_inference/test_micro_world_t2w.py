@@ -5,12 +5,20 @@ from pathlib import Path
 import pytest
 import torch
 
+from vllm_omni.inputs.data import OmniDiffusionSamplingParams
+
 # ruff: noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from vllm_omni import Omni
+from vllm_omni.outputs import OmniRequestOutput
+from vllm_omni.platforms import current_omni_platform
+
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+
+models = ["amd/Micro-World-T2W"]
 
 
 def test_micro_world_t2w_action_module():
@@ -47,71 +55,51 @@ def test_micro_world_t2w_registry():
     assert "MicroWorldI2WPipeline" in _DIFFUSION_PRE_PROCESS_FUNCS
 
 
-def test_micro_world_t2w_weight_mapping():
-    """Test weight name mapping from Wan2.1 original to vllm-omni format."""
-    safetensors = pytest.importorskip("safetensors.torch")
-
-    model_path = os.environ.get(
-        "MICRO_WORLD_T2W_PATH",
-        "pretrained_models/Micro-World-T2W/transformer/diffusion_pytorch_model.safetensors",
+@pytest.mark.parametrize("model_name", models)
+def test_micro_world_t2w_generation(model_name: str):
+    """E2E test: generate action-controlled video via Omni entrypoint."""
+    m = Omni(
+        model=model_name,
+        flow_shift=3.0,
     )
-    if not os.path.exists(model_path):
-        pytest.skip(f"Model weights not found at {model_path}")
 
-    weights = safetensors.load_file(model_path)
+    height = 352
+    width = 640
+    num_frames = 17
+    # 17 latent frames * temporal_ratio(4) + 1 = 69 raw action frames
+    num_action_frames = 69
+    # Walk forward: W=1, rest=0
+    keyboard_actions = [[1, 0, 0, 0, 0, 0, 0]] * num_action_frames
+    mouse_actions = [[0.0, 0.0]] * num_action_frames
 
-    # Simulate the full mapping pipeline
-    weight_name_remapping = [
-        ("head.head.", "proj_out."),
-        ("head.modulation", "output_scale_shift_prepare.scale_shift_table"),
-        ("time_embedding.0.", "condition_embedder.time_embedder.linear_1."),
-        ("time_embedding.2.", "condition_embedder.time_embedder.linear_2."),
-        ("time_projection.1.", "condition_embedder.time_proj."),
-        ("text_embedding.0.", "condition_embedder.text_embedder.linear_1."),
-        ("text_embedding.2.", "condition_embedder.text_embedder.linear_2."),
-    ]
+    outputs = m.generate(
+        prompts="A first person view walking through a forest",
+        sampling_params_list=OmniDiffusionSamplingParams(
+            height=height,
+            width=width,
+            num_frames=num_frames,
+            num_inference_steps=2,
+            guidance_scale=3.0,
+            generator=torch.Generator(current_omni_platform.device_type).manual_seed(42),
+            extra_args={
+                "mouse_actions": mouse_actions,
+                "keyboard_actions": keyboard_actions,
+            },
+        ),
+    )
+    first_output = outputs[0]
+    assert first_output.final_output_type == "image"
+    if not hasattr(first_output, "request_output") or not first_output.request_output:
+        raise ValueError("No request_output found in OmniRequestOutput")
 
-    stacked_params = [
-        (".attn1.to_qkv", ".attn1.to_q", "q"),
-        (".attn1.to_qkv", ".attn1.to_k", "k"),
-        (".attn1.to_qkv", ".attn1.to_v", "v"),
-    ]
+    req_out = first_output.request_output
+    if not isinstance(req_out, OmniRequestOutput) or not hasattr(req_out, "images"):
+        raise ValueError("Invalid request_output structure or missing 'images' key")
 
-    def map_name(name):
-        for old, new in weight_name_remapping:
-            if old in name:
-                name = name.replace(old, new)
-                break
-        name = name.replace(".self_attn.q.", ".attn1.to_q.")
-        name = name.replace(".self_attn.k.", ".attn1.to_k.")
-        name = name.replace(".self_attn.v.", ".attn1.to_v.")
-        name = name.replace(".self_attn.o.", ".attn1.to_out.")
-        name = name.replace(".self_attn.norm_q.", ".attn1.norm_q.")
-        name = name.replace(".self_attn.norm_k.", ".attn1.norm_k.")
-        name = name.replace(".cross_attn.q.", ".attn2.to_q.")
-        name = name.replace(".cross_attn.k.", ".attn2.to_k.")
-        name = name.replace(".cross_attn.v.", ".attn2.to_v.")
-        name = name.replace(".cross_attn.o.", ".attn2.to_out.")
-        name = name.replace(".cross_attn.norm_q.", ".attn2.norm_q.")
-        name = name.replace(".cross_attn.norm_k.", ".attn2.norm_k.")
-        if ".modulation" in name and "action_preprocess" not in name:
-            name = name.replace(".modulation", ".scale_shift_table")
-        if ".ffn.0." in name:
-            name = name.replace(".ffn.0.", ".ffn.net_0.")
-        elif ".ffn.2." in name:
-            name = name.replace(".ffn.2.", ".ffn.net_2.")
-        for param_name, weight_name, _ in stacked_params:
-            if weight_name in name:
-                name = name.replace(weight_name, param_name)
-                break
-        return name
+    frames = req_out.images[0]
 
-    mapped_keys = {map_name(k) for k in weights}
-
-    # 1278 HF keys should map to 1098 unique keys (180 merged via QKV fusion)
-    assert len(weights) == 1278
-    assert len(mapped_keys) == 1098
-
-    # No unfused Q keys should remain
-    unfused_q = [k for k in mapped_keys if ".attn1.to_q." in k]
-    assert len(unfused_q) == 0, f"Unfused Q keys found: {unfused_q}"
+    assert frames is not None
+    assert hasattr(frames, "shape")
+    assert frames.shape[1] == num_frames
+    assert frames.shape[2] == height
+    assert frames.shape[3] == width

@@ -389,10 +389,17 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
         ]
         self.stacked_params_mapping = stacked_params_mapping
 
-        # Wan2.1 original → vllm-omni name remapping
-        weight_name_remapping = {
-            "scale_shift_table": "output_scale_shift_prepare.scale_shift_table",
-        }
+        # Wan2.1 original → vllm-omni name remapping (top-level modules)
+        # Order matters: more specific patterns first
+        weight_name_remapping = [
+            ("head.head.", "proj_out."),
+            ("head.modulation", "output_scale_shift_prepare.scale_shift_table"),
+            ("time_embedding.0.", "condition_embedder.time_embedder.linear_1."),
+            ("time_embedding.2.", "condition_embedder.time_embedder.linear_2."),
+            ("time_projection.1.", "condition_embedder.time_proj."),
+            ("text_embedding.0.", "condition_embedder.text_embedder.linear_1."),
+            ("text_embedding.2.", "condition_embedder.text_embedder.linear_2."),
+        ]
 
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
@@ -400,7 +407,13 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
         for name, loaded_weight in weights:
             original_name = name
 
-            # --- Wan2.1 → diffusers-style name remapping ---
+            # --- Top-level Wan2.1 → vllm-omni remapping ---
+            for old, new in weight_name_remapping:
+                if old in name:
+                    name = name.replace(old, new)
+                    break
+
+            # --- Block-level Wan2.1 → diffusers-style name remapping ---
             # self_attn → attn1, cross_attn → attn2
             name = name.replace(".self_attn.q.", ".attn1.to_q.")
             name = name.replace(".self_attn.k.", ".attn1.to_k.")

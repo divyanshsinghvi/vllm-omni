@@ -33,7 +33,10 @@ logger = init_logger(__name__)
 _VOXTRAL_TTS_MODEL_STAGES = {"audio_generation"}
 _QWEN3_TTS_MODEL_STAGES = {"qwen3_tts"}
 _FISH_TTS_MODEL_STAGES = {"fish_speech_slow_ar"}
-_TTS_MODEL_STAGES: set[str] = _VOXTRAL_TTS_MODEL_STAGES | _QWEN3_TTS_MODEL_STAGES | _FISH_TTS_MODEL_STAGES
+_COSYVOICE3_TTS_MODEL_STAGES = {"cosyvoice3_talker"}
+_TTS_MODEL_STAGES: set[str] = (
+    _VOXTRAL_TTS_MODEL_STAGES | _QWEN3_TTS_MODEL_STAGES | _FISH_TTS_MODEL_STAGES | _COSYVOICE3_TTS_MODEL_STAGES
+)
 _TTS_LANGUAGES: set[str] = {
     "Auto",
     "Chinese",
@@ -221,6 +224,8 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             return "voxtral_tts"
         if model_stage in _FISH_TTS_MODEL_STAGES:
             return "fish_tts"
+        if model_stage in _COSYVOICE3_TTS_MODEL_STAGES:
+            return "cosyvoice3"
         return None
 
     def _compute_max_instructions_length(self) -> int:
@@ -966,7 +971,30 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             if validation_error:
                 raise ValueError(validation_error)
 
-            if self._tts_model_type == "voxtral_tts":
+            if self._tts_model_type == "cosyvoice3":
+                if not request.input or not request.input.strip():
+                    raise ValueError("Input text cannot be empty")
+                if request.ref_audio is None:
+                    raise ValueError(
+                        "CosyVoice3 requires a reference audio for voice cloning. "
+                        "Please provide 'ref_audio' in the request."
+                    )
+                if not request.ref_text or not request.ref_text.strip():
+                    raise ValueError("CosyVoice3 requires 'ref_text' (transcript of the reference audio)")
+                wav_list, sr = await self._resolve_ref_audio(request.ref_audio)
+                audio_data = (np.array(wav_list, dtype=np.float32), sr)
+                prompt = {
+                    "prompt": request.input,
+                    "multi_modal_data": {
+                        "audio": audio_data,
+                    },
+                    "mm_processor_kwargs": {
+                        "prompt_text": request.ref_text,
+                        "sample_rate": sr,
+                    },
+                }
+                tts_params = {}
+            elif self._tts_model_type == "voxtral_tts":
                 prompt = await self._build_voxtral_prompt(request)
                 tts_params = {}
             else:
@@ -984,6 +1012,8 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         request_id = f"speech-{random_uuid()}"
         if self._is_fish_speech:
             model_type = "fish_speech"
+        elif self._tts_model_type == "cosyvoice3":
+            model_type = "cosyvoice3"
         elif self._tts_model_type == "voxtral_tts":
             model_type = "voxtral_tts"
         elif self._is_tts:

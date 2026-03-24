@@ -200,6 +200,9 @@ def test_app(mocker: MockerFixture):
         request_logger=mock_request_logger,
     )
 
+    # Skip TTS validation in tests (mock doesn't set up supported_speakers)
+    speech_server._validate_tts_request = mocker.MagicMock(return_value=None)
+
     # Patch the signature of create_speech to remove 'raw_request' for FastAPI route introspection
     original_create_speech = speech_server.create_speech
     _ = mocker.MagicMock(side_effect=original_create_speech)
@@ -930,7 +933,7 @@ class TestStreamingProtocolValidation:
 
     def test_stream_validation_errors(self):
         """stream=True requires response_format not in ('pcm', 'wav') and speed=1.0."""
-        with pytest.raises(ValidationError, match="requires response_format not in \\('pcm', 'wav'\\)"):
+        with pytest.raises(ValidationError, match="requires response_format='pcm' or 'wav'"):
             OpenAICreateSpeechRequest(input="Hello", stream=True, response_format="mp3")
         with pytest.raises(ValidationError, match="Speed adjustment is not supported"):
             OpenAICreateSpeechRequest(input="Hello", stream=True, response_format="pcm", speed=2.0)

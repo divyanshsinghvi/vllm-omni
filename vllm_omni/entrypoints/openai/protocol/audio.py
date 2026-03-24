@@ -73,7 +73,7 @@ class OpenAICreateSpeechRequest(BaseModel):
         if self.stream:
             if self.response_format not in ("pcm", "wav"):
                 raise ValueError(
-                    "Streaming (stream=true) requires response_format not in ('pcm', 'wav'). "
+                    "Streaming (stream=true) requires response_format='pcm' or 'wav'. "
                     f"Got response_format='{self.response_format}'."
                 )
             if self.speed is None:

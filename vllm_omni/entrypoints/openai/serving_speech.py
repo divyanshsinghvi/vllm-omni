@@ -1191,6 +1191,9 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         merged_requests = [self._merge_batch_item(batch_request, item) for item in batch_request.items]
 
         async def _run_item(idx: int, req: OpenAICreateSpeechRequest) -> SpeechBatchItemResult:
+            validation_error = self._validate_tts_request(req)
+            if validation_error is not None:
+                return SpeechBatchItemResult(index=idx, status="error", error=validation_error)
             try:
                 audio_data, media_type = await self._generate_audio_bytes(req, base64_encode=True)
             except Exception as e:

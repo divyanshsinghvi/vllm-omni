@@ -317,7 +317,7 @@ curl -X POST http://localhost:8091/v1/audio/speech \
     }' --output cloned.wav
 ```
 
-upload voice
+### Upload Voice
 ```bash
 curl -X POST http://localhost:8091/v1/audio/voices \
   -F "audio_sample=@/path/to/voice_sample.wav" \
@@ -325,7 +325,7 @@ curl -X POST http://localhost:8091/v1/audio/voices \
   -F "name=custom_voice_1"
 ```
 
-use upload voice
+### Use Uploaded Voice
 ```bash
 curl -X POST http://localhost:8091/v1/audio/speech \
     -H "Content-Type: application/json" \

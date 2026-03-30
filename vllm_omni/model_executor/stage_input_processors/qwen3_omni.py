@@ -12,6 +12,12 @@ from vllm.platforms import current_platform
 from vllm_omni.data_entry_keys import OmniPayload
 from vllm_omni.engine import OmniEngineCoreRequest
 from vllm_omni.inputs.data import OmniTokensPrompt
+from vllm_omni.model_executor.stage_input_processors.tts_utils import (
+    extract_language_from_prompt,
+    extract_language_from_request,
+    extract_speaker_from_prompt,
+    extract_speaker_from_request,
+)
 
 
 def _compute_talker_prompt_ids_length(info: OmniPayload, device: torch.device | str = "cuda") -> int:
@@ -123,6 +129,12 @@ def thinker2talker_async_chunk(
             "meta": {"finished": torch.tensor(is_finished, dtype=torch.bool)},
         }
         talker_additional_info = payload
+        speaker = extract_speaker_from_request(request)
+        if speaker is not None:
+            talker_additional_info["speaker"] = speaker
+        language = extract_language_from_request(request)
+        if language is not None:
+            talker_additional_info["language"] = language
         if transfer_manager.request_payload.get(request_id) is None:
             if not is_finished:
                 transfer_manager.request_payload[request_id] = talker_additional_info
@@ -151,6 +163,13 @@ def thinker2talker_async_chunk(
         talker_additional_info: OmniPayload = {
             "meta": {"finished": torch.tensor(is_finished, dtype=torch.bool)},
         }
+        speaker = extract_speaker_from_request(request)
+        if speaker is not None:
+            talker_additional_info["speaker"] = speaker
+        language = extract_language_from_request(request)
+        if language is not None:
+            talker_additional_info["language"] = language
+
         if output_token_ids:
             talker_additional_info["meta"]["override_keys"] = [("embed", "decode"), ("ids", "output")]
             talker_additional_info["embed"] = {"decode": thinker_layers[0].detach().cpu()}
@@ -191,7 +210,7 @@ def thinker2talker(
     device = torch.device(current_platform.device_type)
 
     # Process each thinker output
-    for thinker_output in thinker_outputs:
+    for i, thinker_output in enumerate(thinker_outputs):
         output = thinker_output.outputs[0]
         mm: OmniPayload = output.multimodal_output
         mm_hs = mm.get("hidden_states", {})
@@ -214,6 +233,12 @@ def thinker2talker(
             },
         }
         info = payload
+        speaker = extract_speaker_from_prompt(prompt, index=i)
+        if speaker is not None:
+            info["speaker"] = speaker
+        language = extract_language_from_prompt(prompt, index=i)
+        if language is not None:
+            info["language"] = language
 
         prompt_len = _compute_talker_prompt_ids_length(payload, device=device)
 

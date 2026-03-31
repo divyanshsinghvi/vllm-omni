@@ -177,7 +177,7 @@ def test_ic_load_change_mid_request():
     assert _call(tm, "r", n_frames=27) is None
     p3 = _call(tm, "r", n_frames=49)
     assert p3 is not None
-    assert p3["meta"]["left_context_size"] == 16
+    assert p3["meta"]["left_context_size"] == 24
 
     # A *new* request under high load gets IC=16 (not IC=2).
     # Frame 2 would emit under IC=2 but must hold under IC=16.

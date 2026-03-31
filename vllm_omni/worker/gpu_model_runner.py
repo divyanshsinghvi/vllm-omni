@@ -365,7 +365,7 @@ class OmniGPUModelRunner(GPUModelRunner):
                     logger.warning_once(
                         "additional_information on request data is deprecated, use model_intermediate_buffer"
                     )
-                    info_dict = self._resolve_additional_information(new_req_data.additional_information)
+                    info_dict = deserialize_additional_information(new_req_data.additional_information)
                     if info_dict:
                         self.model_intermediate_buffer[req_id] = info_dict
                         setattr(
@@ -906,33 +906,6 @@ class OmniGPUModelRunner(GPUModelRunner):
         except Exception:
             logger.exception("Failed to decode prompt_embeds payload")
         return None
-
-    @staticmethod
-    def _resolve_additional_information(
-        payload: "dict | object | None",
-    ) -> dict[str, object]:
-        """Convert an *additional_information* payload to a plain dict.
-
-        Accepts:
-        - ``dict`` – returned as-is.
-        - ``AdditionalInformationPayload`` – decoded via
-          ``deserialize_payload`` back to nested ``OmniPayload``.
-        - ``None`` – returns ``{}``.
-        """
-        if payload is None:
-            return {}
-        if isinstance(payload, dict):
-            return payload
-        try:
-            from vllm_omni.data_entry_keys import deserialize_payload
-            from vllm_omni.engine import AdditionalInformationPayload
-
-            if isinstance(payload, AdditionalInformationPayload):
-                return deserialize_payload(payload)  # type: ignore[return-value]
-            return {}
-        except Exception:
-            logger.exception("Failed to decode additional_information payload")
-        return {}
 
     def _decode_and_store_request_payloads(
         self,

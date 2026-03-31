@@ -53,7 +53,7 @@ def _call(tm, rid, *, n_frames, finished=False, req_ic=None):
     tm.code_prompt_token_ids[rid] = [_FRAME[:] for _ in range(n_frames)]
     return talker2code2wav_async_chunk(
         transfer_manager=tm,
-        pooling_output={"audio_codes": torch.zeros((0,))},
+        pooling_output={"codes": {"audio": torch.zeros((0,))}},
         request=_req(rid, finished=finished, initial_codec_chunk_frames=req_ic),
         is_finished=finished,
     )
@@ -63,7 +63,7 @@ def test_empty_returns_none():
     tm = _tm()
     p = talker2code2wav_async_chunk(
         transfer_manager=tm,
-        pooling_output={"audio_codes": torch.zeros((0,))},
+        pooling_output={"codes": {"audio": torch.zeros((0,))}},
         request=_req("r", finished=False),
     )
     assert p is None
@@ -77,7 +77,7 @@ def test_eof_marker_when_finished_empty():
         request=_req("r", finished=True),
         is_finished=True,
     )
-    assert p == {"code_predictor_codes": [], "finished": torch.tensor(True, dtype=torch.bool)}
+    assert p == {"codes": {"audio": []}, "meta": {"finished": True}}
 
 
 def test_flush_on_finish():
@@ -90,8 +90,8 @@ def test_flush_on_finish():
         is_finished=True,
     )
     assert p is not None
-    assert p["finished"].item() is True
-    assert len(p["code_predictor_codes"]) == _Q * 24
+    assert p["meta"]["finished"] is True
+    assert len(p["codes"]["audio"]) == _Q * 24
 
 
 _CASES = [
@@ -127,8 +127,8 @@ def test_streaming_phases(config, n_frames, finished, expected):
     else:
         exp_ctx, exp_window = expected
         assert payload is not None
-        assert payload["left_context_size"] == exp_ctx
-        assert len(payload["code_predictor_codes"]) == _Q * exp_window
+        assert payload["meta"]["left_context_size"] == exp_ctx
+        assert len(payload["codes"]["audio"]) == _Q * exp_window
 
 
 def test_dynamic_ic_adapts_to_load():
@@ -138,14 +138,14 @@ def test_dynamic_ic_adapts_to_load():
     # Low load (1/8) -> IC=2 -> emit at 2
     p1 = _call(tm, "r", n_frames=2)
     assert p1 is not None
-    assert len(p1["code_predictor_codes"]) == _Q * 2
+    assert len(p1["codes"]["audio"]) == _Q * 2
 
     # High load: add 4 others -> active=5/8 -> IC=8 -> emit at 8
     for i in range(4):
         tm.code_prompt_token_ids[f"other-{i}"] = [[0]]
     p2 = _call(tm, "r", n_frames=8)
     assert p2 is not None
-    assert len(p2["code_predictor_codes"]) == _Q * 8
+    assert len(p2["codes"]["audio"]) == _Q * 8
 
     # Requests past initial phase still count in load factor
     tm2 = _tm(max_num_seqs=4)
@@ -154,7 +154,7 @@ def test_dynamic_ic_adapts_to_load():
     # active=4/4=1.0 -> IC=16
     p3 = _call(tm2, "new", n_frames=16)
     assert p3 is not None
-    assert len(p3["code_predictor_codes"]) == _Q * 16
+    assert len(p3["codes"]["audio"]) == _Q * 16
 
 
 def test_ic_load_change_mid_request():
@@ -175,7 +175,7 @@ def test_ic_load_change_mid_request():
     # First normal emit at 16+25=41
     p3 = _call(tm, "r", n_frames=41)
     assert p3 is not None
-    assert p3["left_context_size"] == 16
+    assert p3["meta"]["left_context_size"] == 16
 
 
 @pytest.mark.parametrize(
@@ -217,14 +217,14 @@ def test_first_streaming_chunk_prepends_ref_code_context():
 
     payload = talker2code2wav_async_chunk(
         transfer_manager=tm,
-        pooling_output={"audio_codes": torch.zeros((0,)), "ref_code": ref_code},
+        pooling_output={"codes": {"audio": torch.zeros((0,)), "ref": ref_code}},
         request=_req(rid, finished=False, initial_codec_chunk_frames=10),
         is_finished=False,
     )
 
     assert payload is not None
-    assert payload["left_context_size"] == 2
-    assert len(payload["code_predictor_codes"]) == _Q * 12
+    assert payload["meta"]["left_context_size"] == 2
+    assert len(payload["codes"]["audio"]) == _Q * 12
 
 
 def test_ref_code_context_applies_to_all_streaming_chunks():
@@ -238,15 +238,15 @@ def test_ref_code_context_applies_to_all_streaming_chunks():
 
     payload = talker2code2wav_async_chunk(
         transfer_manager=tm,
-        pooling_output={"audio_codes": torch.zeros((0,)), "ref_code": ref_code},
+        pooling_output={"codes": {"audio": torch.zeros((0,)), "ref": ref_code}},
         request=_req(rid, finished=False, initial_codec_chunk_frames=10),
         is_finished=False,
     )
 
     assert payload is not None
     # ref_code (2 frames) prepended as left context on second chunk too
-    assert payload["left_context_size"] == 10 + 2
-    assert len(payload["code_predictor_codes"]) == _Q * (20 + 2)
+    assert payload["meta"]["left_context_size"] == 10 + 2
+    assert len(payload["codes"]["audio"]) == _Q * (20 + 2)
 
 
 def test_ref_code_context_can_be_buffered_before_first_emit():
@@ -256,7 +256,7 @@ def test_ref_code_context_can_be_buffered_before_first_emit():
 
     first_payload = talker2code2wav_async_chunk(
         transfer_manager=tm,
-        pooling_output={"audio_codes": torch.tensor([[1, 2, 3, 4]]), "ref_code": ref_code},
+        pooling_output={"codes": {"audio": torch.tensor([[1, 2, 3, 4]]), "ref": ref_code}},
         request=_req(rid, finished=False, initial_codec_chunk_frames=10),
         is_finished=False,
     )
@@ -266,22 +266,22 @@ def test_ref_code_context_can_be_buffered_before_first_emit():
     for _ in range(8):
         talker2code2wav_async_chunk(
             transfer_manager=tm,
-            pooling_output={"audio_codes": torch.tensor([[1, 2, 3, 4]])},
+            pooling_output={"codes": {"audio": torch.tensor([[1, 2, 3, 4]])}},
             request=_req(rid, finished=False, initial_codec_chunk_frames=10),
             is_finished=False,
         )
 
     payload = talker2code2wav_async_chunk(
         transfer_manager=tm,
-        pooling_output={"audio_codes": torch.tensor([[1, 2, 3, 4]])},
+        pooling_output={"codes": {"audio": torch.tensor([[1, 2, 3, 4]])}},
         request=_req(rid, finished=False, initial_codec_chunk_frames=10),
         is_finished=False,
     )
 
     assert payload is not None
     # ref_code (2 frames) is kept (not popped) for subsequent chunks
-    assert payload["left_context_size"] == 2
-    assert len(payload["code_predictor_codes"]) == _Q * 12
+    assert payload["meta"]["left_context_size"] == 2
+    assert len(payload["codes"]["audio"]) == _Q * 12
     assert rid in tm.request_payload
 
 
@@ -295,14 +295,17 @@ def test_non_async_processor_prepends_ref_code_and_sets_trim_context():
         ],
         dtype=torch.long,
     )
-    output = SimpleNamespace(multimodal_output={"audio_codes": audio_codes, "ref_code": ref_code})
-    stage = SimpleNamespace(engine_outputs=[SimpleNamespace(outputs=[output])])
+    output = SimpleNamespace(
+        multimodal_output={"codes": {"audio": audio_codes, "ref": ref_code}},
+        token_ids=[0, 0, 0, 0],
+    )
+    stage = SimpleNamespace(engine_outputs=[SimpleNamespace(outputs=[output], finished=True)])
 
     prompts = talker2code2wav(stage_list=[stage], engine_input_source=[0])
 
     assert len(prompts) == 1
     prompt = prompts[0]
-    assert prompt["additional_information"] == {"left_context_size": [2]}
+    assert prompt["additional_information"] == {"meta": {"left_context_size": [2]}}
     assert prompt["prompt_token_ids"] == [
         9,
         8,
@@ -335,8 +338,11 @@ def test_non_async_processor_filters_out_of_range_codec_values():
         ],
         dtype=torch.long,
     )
-    output = SimpleNamespace(multimodal_output={"audio_codes": audio_codes, "ref_code": ref_code})
-    stage = SimpleNamespace(engine_outputs=[SimpleNamespace(outputs=[output])])
+    output = SimpleNamespace(
+        multimodal_output={"codes": {"audio": audio_codes, "ref": ref_code}},
+        token_ids=[0, 0, 0, 0, 0],
+    )
+    stage = SimpleNamespace(engine_outputs=[SimpleNamespace(outputs=[output], finished=True)])
 
     prompts = talker2code2wav(stage_list=[stage], engine_input_source=[0])
 
@@ -344,4 +350,4 @@ def test_non_async_processor_filters_out_of_range_codec_values():
     prompt = prompts[0]
     # Only ref_code (1 frame) + 2 valid frames = 3 frames * 4 quantizers = 12 codes
     assert len(prompt["prompt_token_ids"]) == 4 * 3
-    assert prompt["additional_information"] == {"left_context_size": [1]}
+    assert prompt["additional_information"] == {"meta": {"left_context_size": [1]}}

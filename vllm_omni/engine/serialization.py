@@ -6,7 +6,7 @@ from typing import Any
 
 from vllm.logger import init_logger
 
-from vllm_omni.data_entry_keys import OmniPayload, serialize_payload
+from vllm_omni.data_entry_keys import OmniPayload, deserialize_payload, serialize_payload
 from vllm_omni.engine import AdditionalInformationPayload
 
 logger = init_logger(__name__)
@@ -29,3 +29,14 @@ def serialize_additional_information(
 
     payload: OmniPayload = raw_info  # type: ignore[assignment]
     return serialize_payload(payload)
+
+
+def deserialize_additional_information(
+    payload: dict | AdditionalInformationPayload | None,
+) -> dict:
+    """Deserialize an *additional_information* payload into a plain dict."""
+    if payload is None:
+        return {}
+    if isinstance(payload, dict):
+        return payload
+    return deserialize_payload(payload)  # type: ignore[return-value]

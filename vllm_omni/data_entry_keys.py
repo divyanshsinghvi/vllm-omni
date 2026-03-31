@@ -209,8 +209,7 @@ def serialize_payload(
         elif isinstance(value, list):
             entries[key] = AdditionalInformationEntry(list_data=value)
         elif value is not None:
-            # Scalars (bool, int, etc.) — wrap in a single-element list
-            entries[key] = AdditionalInformationEntry(list_data=[value])
+            entries[key] = AdditionalInformationEntry(scalar_data=value)
 
     return AdditionalInformationPayload(entries=entries) if entries else None
 
@@ -229,10 +228,8 @@ def deserialize_payload(
         if entry.tensor_data is not None:
             flat[key] = _deserialize_tensor(entry)
         elif entry.list_data is not None:
-            val = entry.list_data
-            # Unwrap single-element scalar lists from meta keys
-            if key.startswith("meta.") and isinstance(val, list) and len(val) == 1:
-                val = val[0]
-            flat[key] = val
+            flat[key] = entry.list_data
+        elif entry.scalar_data is not None:
+            flat[key] = entry.scalar_data
 
     return unflatten_payload(flat)  # type: ignore[return-value]

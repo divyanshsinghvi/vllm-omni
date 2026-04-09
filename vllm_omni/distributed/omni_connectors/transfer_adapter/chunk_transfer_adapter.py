@@ -211,7 +211,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             merged_sub = dict(origin_sub)
             for qual, value in new_val.items():
                 if type_key == "meta" and qual == "finished":
-                    continue
+                    merged_sub[qual] = value
                 elif (type_key, qual) in override_keys:
                     merged_sub[qual] = value
                 elif isinstance(value, torch.Tensor) and qual in origin_sub:

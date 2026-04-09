@@ -175,6 +175,32 @@ def test_update_request_payload(build_adapter):
     assert merged["meta"]["finished"] is True
 
 
+def test_load_poll_ar_request_additional_information_uses_merged_payload(build_adapter):
+    adapter, connector = build_adapter(stage_id=2, model_mode="ar")
+    request = _req("req-merged", RequestStatus.WAITING, external_req_id="ext-merged")
+
+    adapter.request_ids_mapping["req-merged"] = "ext-merged"
+    adapter.request_payload["ext-merged"] = {
+        "hidden_states": {"output": torch.tensor([[1.0]])},
+        "ids": {"prompt": [11, 12]},
+        "meta": {"finished": False},
+    }
+    payload: OmniPayload = {
+        "hidden_states": {"output": torch.tensor([[2.0]])},
+        "meta": {"finished": True},
+    }
+    connector.get.return_value = (payload, 8)
+
+    adapter._poll_single_request(request)
+
+    assert torch.equal(
+        request.additional_information["hidden_states"]["output"],
+        torch.tensor([[1.0], [2.0]]),
+    )
+    assert request.additional_information["ids"]["prompt"] == [11, 12]
+    assert request.additional_information["meta"]["finished"] is True
+
+
 def test_process_and_restore_queues(build_adapter):
     adapter, _ = build_adapter(stage_id=1, max_num_seqs=8)
     waiting_req = _req("w1", RequestStatus.WAITING)

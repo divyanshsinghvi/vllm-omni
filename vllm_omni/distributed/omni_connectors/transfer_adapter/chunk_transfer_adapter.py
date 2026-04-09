@@ -153,8 +153,8 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
 
             meta = payload_data.get("meta", {})
             if self.model_mode == "ar":
-                self._update_request_payload(external_req_id, payload_data)
-                request.additional_information = payload_data
+                merged_payload = self._update_request_payload(external_req_id, payload_data)
+                request.additional_information = merged_payload
                 if meta.get("finished"):
                     self.finished_requests.add(req_id)
             else:

@@ -186,34 +186,44 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         return False
 
     def _update_request_payload(self, req_id: str, payload_data: dict[str, Any]) -> dict[str, Any]:
-        """Update the payload data for a request in the connector.
+        """Deep-merge *payload_data* into the stored payload for *req_id*.
 
-        Args:
-            connector: OmniConnectorBase instance
-            req_id: Request ID to update
-            payload_data: New payload data to store
+        Keys present in the stored payload but absent from *payload_data*
+        are preserved (important for multi-chunk flows where only the first
+        chunk carries the full set of fields).
         """
         if req_id not in self.request_payload:
             self.request_payload[req_id] = payload_data
             return payload_data
-        origin_payload = self.request_payload[req_id]
+        origin = self.request_payload[req_id]
         override_keys = set(payload_data.get("meta", {}).pop("override_keys", []))
-        for type_key, sub_dict in payload_data.items():
-            if not isinstance(sub_dict, dict):
+
+        merged: dict[str, Any] = dict(origin)
+
+        for type_key, new_val in payload_data.items():
+            if not isinstance(new_val, dict):
+                merged[type_key] = new_val
                 continue
-            origin_sub = origin_payload.get(type_key, {})
-            for qual, value in sub_dict.items():
+            origin_sub = merged.get(type_key)
+            if not isinstance(origin_sub, dict):
+                merged[type_key] = new_val
+                continue
+            merged_sub = dict(origin_sub)
+            for qual, value in new_val.items():
                 if type_key == "meta" and qual == "finished":
                     continue
                 elif (type_key, qual) in override_keys:
-                    sub_dict[qual] = value
+                    merged_sub[qual] = value
                 elif isinstance(value, torch.Tensor) and qual in origin_sub:
-                    sub_dict[qual] = torch.cat([origin_sub[qual], value], dim=0)
+                    merged_sub[qual] = torch.cat([origin_sub[qual], value], dim=0)
                 elif isinstance(value, list) and qual in origin_sub:
-                    sub_dict[qual] = origin_sub[qual] + value
+                    merged_sub[qual] = origin_sub[qual] + value
+                else:
+                    merged_sub[qual] = value
+            merged[type_key] = merged_sub
 
-        self.request_payload[req_id] = payload_data
-        return payload_data
+        self.request_payload[req_id] = merged
+        return merged
 
     def _send_single_request(self, task: dict):
         raw_po = task["pooling_output"]
@@ -252,7 +262,8 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         if success:
             self.put_req_chunk[external_req_id] += 1
             logger.debug(f"[Stage-{stage_id}] Sent {connector_put_key}")
-            finished_flag = payload_data.get("finished")
+            finished_flag = payload_data.get("meta", {}).get("finished",
+                                                              payload_data.get("finished"))
             is_payload_finished = False
             if isinstance(finished_flag, torch.Tensor):
                 is_payload_finished = finished_flag.numel() == 1 and bool(finished_flag.item())

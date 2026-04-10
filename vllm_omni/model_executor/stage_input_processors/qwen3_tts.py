@@ -54,7 +54,7 @@ def talker2code2wav(
         if seq_len > 0 and audio_codes.ndim == 2 and int(audio_codes.shape[0]) > seq_len:
             audio_codes = audio_codes[-seq_len:]
         ref_code = mm_codes.get("ref")
-        ref_code_len = mm_codes.get("ref_len")
+        ref_code_len = mm.get("meta", {}).get("ref_code_len")
         if isinstance(ref_code_len, torch.Tensor):
             ref_code_len = int(ref_code_len.reshape(-1)[-1].item()) if ref_code_len.numel() > 0 else 0
         elif ref_code_len is None:

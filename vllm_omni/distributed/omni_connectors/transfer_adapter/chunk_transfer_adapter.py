@@ -196,7 +196,8 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             self.request_payload[req_id] = payload_data
             return payload_data
         origin = self.request_payload[req_id]
-        override_keys = set(payload_data.get("meta", {}).pop("override_keys", []))
+        raw_ok = payload_data.get("meta", {}).pop("override_keys", [])
+        override_keys = {tuple(k) if isinstance(k, list) else k for k in raw_ok}
 
         merged: dict[str, Any] = dict(origin)
 

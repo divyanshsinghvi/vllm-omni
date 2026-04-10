@@ -5,7 +5,6 @@
 from types import SimpleNamespace
 
 import pytest
-import torch
 
 from vllm_omni.model_executor.stage_input_processors.mimo_audio import _flush_remaining_codes
 
@@ -13,7 +12,7 @@ pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
 
 def _sentinel():
-    return {"codes": {"audio": []}, "meta": {"finished": torch.tensor(True, dtype=torch.bool)}}
+    return {"codes": {"audio": []}, "meta": {"finished": True}}
 
 
 def test_flush_remaining_codes_when_no_codes_accumulated_missing_request_id():
@@ -21,7 +20,7 @@ def test_flush_remaining_codes_when_no_codes_accumulated_missing_request_id():
     tm = SimpleNamespace(code_prompt_token_ids={})
     out = _flush_remaining_codes(tm, "missing", chunk_size=3, left_context_size=3)
     assert out["codes"]["audio"] == _sentinel()["codes"]["audio"]
-    assert out["meta"]["finished"].equal(_sentinel()["meta"]["finished"])
+    assert out["meta"]["finished"] is True
 
 
 def test_flush_remaining_codes_when_no_codes_accumulated_empty_list():
@@ -29,7 +28,7 @@ def test_flush_remaining_codes_when_no_codes_accumulated_empty_list():
     tm = SimpleNamespace(code_prompt_token_ids={"r": []})
     out = _flush_remaining_codes(tm, "r", chunk_size=3, left_context_size=3)
     assert out["codes"]["audio"] == []
-    assert out["meta"]["finished"].item() is True
+    assert out["meta"]["finished"] is True
 
 
 def test_flush_remaining_codes_partial_chunk_remaining():
@@ -41,7 +40,7 @@ def test_flush_remaining_codes_partial_chunk_remaining():
         code_prompt_token_ids={"r": [[1], [2], [3], [4], [5], [6], [7]]},
     )
     out = _flush_remaining_codes(tm, "r", chunk_size=3, left_context_size=3)
-    assert out["meta"]["finished"].item() is True
+    assert out["meta"]["finished"] is True
     assert out["codes"]["audio"] == [4, 5, 6, 7]
 
 
@@ -75,4 +74,4 @@ def test_flush_remaining_codes_context_window_end_index(
     out = _flush_remaining_codes(tm, "r", chunk_size=chunk_size, left_context_size=left_context)
     expected_flat = list(range(length - expected_end_index, length))
     assert out["codes"]["audio"] == expected_flat
-    assert out["meta"]["finished"].item() is True
+    assert out["meta"]["finished"] is True

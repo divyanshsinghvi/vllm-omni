@@ -241,7 +241,7 @@ def ar2diffusion(
             "width": pixel_w,
             "extra": {
                 "prior_token_ids": prior_token_ids,
-                "ids.prior_image": prior_token_image_ids,
+                "prior_token_image_ids": prior_token_image_ids,
             },
         }
 

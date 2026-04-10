@@ -263,8 +263,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         if success:
             self.put_req_chunk[external_req_id] += 1
             logger.debug(f"[Stage-{stage_id}] Sent {connector_put_key}")
-            finished_flag = payload_data.get("meta", {}).get("finished",
-                                                              payload_data.get("finished"))
+            finished_flag = payload_data.get("meta", {}).get("finished", payload_data.get("finished"))
             is_payload_finished = False
             if isinstance(finished_flag, torch.Tensor):
                 is_payload_finished = finished_flag.numel() == 1 and bool(finished_flag.item())

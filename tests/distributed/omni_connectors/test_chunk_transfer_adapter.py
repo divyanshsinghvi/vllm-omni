@@ -113,7 +113,7 @@ def test_load_poll(build_adapter):
     payload: OmniPayload = {
         "codes": {"audio": [[1]]},
         "hidden_states": {"output": torch.tensor([[2.0]])},
-        "meta": {"finished": True},
+        "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
     }
     connector.get.return_value = (payload, 16)
     adapter._poll_single_request(request)
@@ -160,19 +160,19 @@ def test_update_request_payload(build_adapter):
     first: OmniPayload = {
         "hidden_states": {"output": torch.tensor([[1.0]])},
         "codes": {"audio": [1]},
-        "meta": {"finished": False},
+        "meta": {"finished": torch.tensor(False, dtype=torch.bool)},
     }
     adapter._update_request_payload("ext", first)
     second: OmniPayload = {
         "hidden_states": {"output": torch.tensor([[2.0]])},
         "codes": {"audio": [2]},
-        "meta": {"finished": True},
+        "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
     }
     merged = adapter._update_request_payload("ext", second)
 
     assert torch.equal(merged["hidden_states"]["output"], torch.tensor([[1.0], [2.0]]))
     assert merged["codes"]["audio"] == [1, 2]
-    assert merged["meta"]["finished"] is True
+    assert merged["meta"]["finished"].item() is True
 
 
 def test_load_poll_ar_request_additional_information_uses_merged_payload(build_adapter):
@@ -183,11 +183,11 @@ def test_load_poll_ar_request_additional_information_uses_merged_payload(build_a
     adapter.request_payload["ext-merged"] = {
         "hidden_states": {"output": torch.tensor([[1.0]])},
         "ids": {"prompt": [11, 12]},
-        "meta": {"finished": False},
+        "meta": {"finished": torch.tensor(False, dtype=torch.bool)},
     }
     payload: OmniPayload = {
         "hidden_states": {"output": torch.tensor([[2.0]])},
-        "meta": {"finished": True},
+        "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
     }
     connector.get.return_value = (payload, 8)
 
@@ -198,7 +198,7 @@ def test_load_poll_ar_request_additional_information_uses_merged_payload(build_a
         torch.tensor([[1.0], [2.0]]),
     )
     assert request.additional_information["ids"]["prompt"] == [11, 12]
-    assert request.additional_information["meta"]["finished"] is True
+    assert request.additional_information["meta"]["finished"].item() is True
 
 
 def test_process_and_restore_queues(build_adapter):
@@ -360,7 +360,10 @@ def test_cleanup_after_poll_flow(build_adapter):
     adapter.load_async(request)
 
     adapter.request_ids_mapping["req-flow"] = "ext-flow"
-    payload: OmniPayload = {"hidden_states": {"output": torch.tensor([[1.0]])}, "meta": {"finished": True}}
+    payload: OmniPayload = {
+        "hidden_states": {"output": torch.tensor([[1.0]])},
+        "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
+    }
     connector.get.return_value = (payload, 8)
     adapter._poll_single_request(request)
 

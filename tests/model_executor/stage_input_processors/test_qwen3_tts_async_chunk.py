@@ -79,7 +79,8 @@ def test_eof_marker_when_finished_empty():
         request=_req("r", finished=True),
         is_finished=True,
     )
-    assert p == {"codes": {"audio": []}, "meta": {"finished": True}}
+    assert p["codes"] == {"audio": []}
+    assert p["meta"]["finished"].item() is True
 
 
 def test_flush_on_finish():
@@ -92,7 +93,7 @@ def test_flush_on_finish():
         is_finished=True,
     )
     assert p is not None
-    assert p["meta"]["finished"] is True
+    assert p["meta"]["finished"].item() is True
     assert len(p["codes"]["audio"]) == _Q * 24
 
 

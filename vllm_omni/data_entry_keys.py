@@ -71,7 +71,7 @@ class Ids(TypedDict, total=False):
 
 
 class OmniPayloadMeta(TypedDict, total=False):
-    finished: bool
+    finished: torch.Tensor
     left_context_size: int
     override_keys: list[tuple[str, str]]
     num_processed_tokens: int

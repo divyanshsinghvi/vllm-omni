@@ -182,7 +182,7 @@ def talker2code2wav_async_chunk(
                 return None
             payload: dict[str, Any] = {
                 "codes": {"audio": []},
-                "meta": {"finished": True},
+                "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
             }
             if not state.get("sent_prompt", False):
                 payload.update(state.get("prompt_payload", {}))
@@ -194,7 +194,7 @@ def talker2code2wav_async_chunk(
         if finished and length <= emitted_token_len:
             payload = {
                 "codes": {"audio": []},
-                "meta": {"finished": True},
+                "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
             }
             if not state.get("sent_prompt", False):
                 payload.update(state.get("prompt_payload", {}))
@@ -226,7 +226,7 @@ def talker2code2wav_async_chunk(
 
         payload = {
             "codes": {"audio": code_predictor_codes},
-            "meta": {"finished": finished},
+            "meta": {"finished": torch.tensor(finished, dtype=torch.bool)},
             "token_offset": token_offset,
             "left_context_size": token_offset,
             "req_id": [request_id],

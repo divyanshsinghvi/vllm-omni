@@ -126,7 +126,7 @@ def test_flush_tail_when_finished():
     )
 
     assert payload is not None
-    assert payload["meta"]["finished"] is True
+    assert payload["meta"]["finished"].item() is True
     codes = payload["codes"]["audio"]
     # Format: [ctx_frames, context_length, ...flat_codes]
     assert len(codes) >= 2  # At least ctx_frames + context_length header
@@ -149,10 +149,8 @@ def test_eof_marker_when_finished_with_no_frames():
         request=request,
     )
 
-    assert payload == {
-        "codes": {"audio": []},
-        "meta": {"finished": True},
-    }
+    assert payload["codes"] == {"audio": []}
+    assert payload["meta"]["finished"].item() is True
 
 
 def test_normal_chunk_emission():

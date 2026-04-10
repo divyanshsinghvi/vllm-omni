@@ -47,7 +47,7 @@ def prepend_and_flatten_colmajor(x: torch.Tensor, pad_vec: torch.Tensor) -> torc
 
 def _make_finished_sentinel() -> dict[str, Any]:
     """Return a minimal payload with finished=True so Stage-1 can end the request."""
-    return {"codes": {"audio": []}, "meta": {"finished": True}}
+    return {"codes": {"audio": []}, "meta": {"finished": torch.tensor(True, dtype=torch.bool)}}
 
 
 def _flush_remaining_codes(
@@ -77,7 +77,7 @@ def _flush_remaining_codes(
             "codec_chunk_frames": chunk_size,
             "codec_left_context_frames": left_context_size,
             "code_flat_numel": len(flat_codes),
-            "finished": True,
+            "finished": torch.tensor(True, dtype=torch.bool),
         },
     }
 
@@ -168,7 +168,7 @@ def llm2code2wav_async_chunk(
             "codec_chunk_frames": chunk_size,
             "codec_left_context_frames": left_context_size,
             "code_flat_numel": len(flat_codes),
-            "finished": bool(is_finished),
+            "finished": torch.tensor(is_finished, dtype=torch.bool),
         },
     }
 

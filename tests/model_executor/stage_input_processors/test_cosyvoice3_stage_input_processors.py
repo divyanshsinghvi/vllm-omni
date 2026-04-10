@@ -83,7 +83,7 @@ def test_talker2code2wav_async_chunk_final_payload_uses_absolute_token_offset():
     )
 
     assert payload is not None
-    assert payload["meta"]["finished"] is True
+    assert payload["meta"]["finished"].item() is True
     assert payload["codes"]["audio"] == [1, 2, 3]
     assert payload["token_offset"] == 0
     assert payload["left_context_size"] == 0
@@ -112,7 +112,7 @@ def test_talker2code2wav_async_chunk_emits_eof_when_finished_without_valid_codes
 
     assert payload is not None
     assert payload["codes"]["audio"] == []
-    assert payload["meta"]["finished"] is True
+    assert payload["meta"]["finished"].item() is True
 
 
 def test_talker2code2wav_async_chunk_does_not_reemit_without_new_tokens():
@@ -170,7 +170,7 @@ def test_talker2code2wav_async_chunk_waits_for_prelookahead_and_emits_cumulative
     assert payload_ready is not None
     assert payload_ready["codes"]["audio"] == [1, 2, 3]
     assert payload_ready["token_offset"] == 0
-    assert payload_ready["meta"]["finished"] is False
+    assert payload_ready["meta"]["finished"].item() is False
 
 
 def test_talker2code2wav_async_chunk_final_flush_uses_previous_token_offset():
@@ -197,11 +197,11 @@ def test_talker2code2wav_async_chunk_final_flush_uses_previous_token_offset():
     )
 
     assert payload_stream is not None
-    assert payload_stream["meta"]["finished"] is False
+    assert payload_stream["meta"]["finished"].item() is False
     assert payload_stream["codes"]["audio"] == [3, 4, 5]
     assert payload_stream["token_offset"] == 0
     assert payload_final is not None
-    assert payload_final["meta"]["finished"] is True
+    assert payload_final["meta"]["finished"].item() is True
     assert payload_final["codes"]["audio"] == [3, 4, 5, 6]
     assert payload_final["token_offset"] == 2
 
@@ -260,8 +260,8 @@ def test_talker2code2wav_async_chunk_emits_terminal_eof_without_duplicate_audio(
     )
 
     assert payload_stream is not None
-    assert payload_stream["meta"]["finished"] is False
+    assert payload_stream["meta"]["finished"].item() is False
     assert payload_stream["codes"]["audio"] == [3, 4]
     assert payload_final is not None
-    assert payload_final["meta"]["finished"] is True
+    assert payload_final["meta"]["finished"].item() is True
     assert payload_final["codes"]["audio"] == []

@@ -126,7 +126,7 @@ def thinker2talker_async_chunk(
             },
             "hidden_states": {"output": thinker_layers[24].detach().cpu()},
             "ids": {"all": all_token_ids, "prompt": prompt_token_ids},
-            "meta": {"finished": bool(is_finished)},
+            "meta": {"finished": torch.tensor(is_finished, dtype=torch.bool)},
         }
         talker_additional_info = payload
         speaker = extract_speaker_from_request(request)
@@ -161,7 +161,7 @@ def thinker2talker_async_chunk(
         output_token_ids = _ensure_list(output_token_ids)
 
         talker_additional_info: OmniPayload = {
-            "meta": {"finished": bool(is_finished)},
+            "meta": {"finished": torch.tensor(is_finished, dtype=torch.bool)},
         }
         speaker = extract_speaker_from_request(request)
         if speaker is not None:
@@ -321,7 +321,7 @@ def talker2code2wav_async_chunk(
 
     return {
         "codes": {"audio": codes},
-        "meta": {"left_context_size": left_context_size, "finished": bool(is_finished)},
+        "meta": {"left_context_size": left_context_size, "finished": torch.tensor(is_finished, dtype=torch.bool)},
     }
 
 

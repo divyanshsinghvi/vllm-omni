@@ -83,7 +83,7 @@ def generator2tokenizer_async_chunk(
         if finished:
             return {
                 "codes": {"audio": []},
-                "meta": {"finished": True},
+                "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
             }
         return None
 
@@ -106,5 +106,5 @@ def generator2tokenizer_async_chunk(
 
     return {
         "codes": {"audio": [int(ctx_frames)] + [int(context_length)] + code_predictor_codes},
-        "meta": {"finished": finished},
+        "meta": {"finished": torch.tensor(finished, dtype=torch.bool)},
     }

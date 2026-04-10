@@ -111,7 +111,7 @@ def slow_ar_to_dac_decoder_async_chunk(
         if finished:
             return {
                 "codes": {"audio": []},
-                "meta": {"finished": True},
+                "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
             }
         return None
 
@@ -144,5 +144,5 @@ def slow_ar_to_dac_decoder_async_chunk(
 
     return {
         "codes": {"audio": code_predictor_codes},
-        "meta": {"left_context_size": left_context_size, "finished": finished},
+        "meta": {"left_context_size": left_context_size, "finished": torch.tensor(finished, dtype=torch.bool)},
     }

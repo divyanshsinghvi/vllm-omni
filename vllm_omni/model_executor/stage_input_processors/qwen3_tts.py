@@ -210,7 +210,7 @@ def talker2code2wav_async_chunk(
         if finished:
             return {
                 "codes": {"audio": []},
-                "meta": {"finished": True},
+                "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
             }
         return None
 
@@ -257,7 +257,7 @@ def talker2code2wav_async_chunk(
 
     info: dict[str, Any] = {
         "codes": {"audio": code_predictor_codes},
-        "meta": {"left_context_size": left_context_size, "finished": finished},
+        "meta": {"left_context_size": left_context_size, "finished": torch.tensor(finished, dtype=torch.bool)},
     }
     # Propagate speaker and language from the request so they are available
     # as runtime_additional_information in subsequent pipeline stages, consistent

@@ -7,6 +7,7 @@ from typing import Any
 
 import torch
 from vllm.inputs import TextPrompt
+from vllm.logger import init_logger
 from vllm.platforms import current_platform
 
 from vllm_omni.data_entry_keys import OmniPayload
@@ -18,6 +19,8 @@ from vllm_omni.model_executor.stage_input_processors.tts_utils import (
     extract_speaker_from_prompt,
     extract_speaker_from_request,
 )
+
+logger = init_logger(__name__)
 
 
 def _compute_talker_prompt_ids_length(info: OmniPayload, device: torch.device | str = "cuda") -> int:
@@ -303,6 +306,16 @@ def talker2code2wav_async_chunk(
     request_id = request.external_req_id
     transfer_manager.code_prompt_token_ids[request_id].append(codec_codes)
     length = len(transfer_manager.code_prompt_token_ids[request_id])
+
+    # Debug: log per-step codes for each request to diagnose audio corruption
+    logger.warning(
+        "[DEBUG-CODES] req=%s step=%d codes=%s is_finished=%s",
+        request_id[-8:],
+        length,
+        codec_codes[:4],
+        is_finished,
+    )
+
     chunk_length = length % chunk_size_config
     if chunk_length != 0 and not is_finished:
         return None
@@ -317,6 +330,17 @@ def talker2code2wav_async_chunk(
         .transpose(0, 1)
         .reshape(-1)
         .tolist()
+    )
+
+    # Debug: log chunk assembly details
+    logger.warning(
+        "[DEBUG-CHUNK] req=%s chunk_frames=%d left_ctx=%d end_idx=%d total_codes=%d codes_hash=%d",
+        request_id[-8:],
+        context_length,
+        left_context_size,
+        end_index,
+        len(codes),
+        sum(codes) % 100000,
     )
 
     return {

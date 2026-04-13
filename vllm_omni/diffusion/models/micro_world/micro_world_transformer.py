@@ -176,7 +176,7 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
         keyboard_dim: Dimensionality of keyboard input (default 7).
         action_layers: Indices of main blocks that receive action skip connections.
             Defaults to every 2nd block [0, 2, 4, ...].
-        **kwargs: Passed to WanTransformer3DModel.
+        **kwargs (Any): Passed to WanTransformer3DModel.
     """
 
     def __init__(
@@ -564,7 +564,7 @@ class MicroWorldAdaLNTransformer(WanTransformer3DModel):
         action_dim: Dimension of action features (default 1536).
         mouse_dim: Dimensionality of mouse input (default 2).
         keyboard_dim: Dimensionality of keyboard input (default 7).
-        **kwargs: Passed to WanTransformer3DModel.
+        **kwargs (Any): Passed to WanTransformer3DModel.
     """
 
     def __init__(

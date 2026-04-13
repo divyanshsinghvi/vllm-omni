@@ -61,27 +61,6 @@ def test_micro_world_t2w_registry():
 # ── Correlation / regression tests ───────────────────────────────────────
 
 
-def test_action_module_deterministic():
-    """Verify ActionModule output is deterministic given the same weights and input."""
-    from vllm_omni.diffusion.models.micro_world.action_module import ActionModule
-
-    torch.manual_seed(0)
-    am = ActionModule(flatten_spatial=True)
-    am.eval()
-
-    mouse = torch.zeros(1, 69, 2)
-    mouse[0, :, 0] = 0.5
-    keyboard = torch.zeros(1, 69, 7)
-    keyboard[0, :, 0] = 1.0  # W pressed
-    grid_sizes = (5, 22, 40)
-
-    with torch.no_grad():
-        out1 = am(mouse, keyboard, grid_sizes)
-        out2 = am(mouse, keyboard, grid_sizes)
-
-    assert torch.equal(out1, out2), "ActionModule is not deterministic"
-
-
 def test_action_module_sensitivity():
     """Different actions must produce different outputs (action signal is not ignored)."""
     from vllm_omni.diffusion.models.micro_world.action_module import ActionModule

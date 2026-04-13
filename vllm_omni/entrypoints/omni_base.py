@@ -88,6 +88,7 @@ class OmniBase:
         self.log_stats = log_stats
         self.async_chunk = async_chunk
         self.output_modalities = output_modalities or []
+        self.tts_batch_max_items: int = kwargs.pop("tts_batch_max_items", 32)
 
         logger.info("[%s] Initializing with model %s", self.__class__.__name__, model)
         st = time.time()
@@ -281,6 +282,11 @@ class OmniBase:
             final_output_type=stage_meta["final_output_type"],
             request_output=engine_outputs,
             images=images,
+            trajectory_latents=getattr(engine_outputs, "trajectory_latents", None),
+            trajectory_timesteps=getattr(engine_outputs, "trajectory_timesteps", None),
+            trajectory_log_probs=getattr(engine_outputs, "trajectory_log_probs", None),
+            trajectory_decoded=getattr(engine_outputs, "trajectory_decoded", None),
+            _custom_output=getattr(engine_outputs, "_custom_output", {}),
             stage_durations=stage_durations,
             peak_memory_mb=peak_memory_mb,
         )
@@ -291,6 +297,37 @@ class OmniBase:
 
     def close(self) -> None:
         self.shutdown()
+
+    def start_profile(
+        self,
+        profile_prefix: str | None = None,
+        stages: list[int] | None = None,
+    ) -> list[Any]:
+        """Start profiling specified stages.
+
+        Uses vLLM-compatible profile(is_start=True, profile_prefix) interface.
+
+        Args:
+            profile_prefix: Optional prefix for the trace file names.
+            stages: List of stage IDs to profile. If None, profiles all stages.
+
+        Returns:
+            List of results from each stage.
+        """
+        return self.engine.collective_rpc(method="profile", args=(True, profile_prefix), stage_ids=stages)
+
+    def stop_profile(self, stages: list[int] | None = None) -> list[Any]:
+        """Stop profiling specified stages.
+
+        Uses vLLM-compatible profile(is_start=False) interface.
+
+        Args:
+            stages: List of stage IDs to profile. If None, stops all stages.
+
+        Returns:
+            List of results from each stage.
+        """
+        return self.engine.collective_rpc(method="profile", args=(False, None), stage_ids=stages)
 
     def _shutdown_base(self) -> None:
         if getattr(self, "_shutdown_called", False):

@@ -19,12 +19,21 @@ Please refer to [README.md](https://github.com/vllm-project/vllm-omni/tree/main/
 
 ## Gradio Demo
 
+!!! note "Gradio is an optional dependency"
+    The Gradio demo requires the `[demo]` extras. Install them first:
+
+    ```bash
+    pip install 'vllm-omni[demo]'
+    ```
+
+    Or, if installing from source: `pip install -e '.[demo]'`
+
 Two interactive Gradio demos are available, both supporting all 3 task types:
 
-| Demo | File | Transport | Streaming Quality |
-| ---- | ---- | --------- | ----------------- |
-| Standard | `gradio_demo.py` | HTTP chunked | May have small gaps between chunks |
-| FastRTC | `gradio_fastrtc_demo.py` | WebRTC | Gapless streaming (requires `pip install fastrtc`) |
+| Demo     | File                     | Transport    | Streaming Quality                                  |
+| -------- | ------------------------ | ------------ | -------------------------------------------------- |
+| Standard | `gradio_demo.py`         | HTTP chunked | May have small gaps between chunks                 |
+| FastRTC  | `gradio_fastrtc_demo.py` | WebRTC       | Gapless streaming (requires `pip install fastrtc`) |
 
 ```bash
 # Option 1: Launch server + Standard Gradio together
@@ -137,8 +146,8 @@ The Python client supports the following command-line arguments:
 - `--speaker`: Speaker name (default: `vivian`). Options: `vivian`, `ryan`, `aiden`, etc.
 - `--language`: Language. Options: `Auto`, `Chinese`, `English`, `Japanese`, `Korean`, `German`, `French`, `Russian`, `Portuguese`, `Spanish`, `Italian`
 - `--instructions`: Voice style/emotion instructions
-- `--ref-audio`: Reference audio file path or URL for voice cloning (Base task)
-- `--ref-text`: Reference audio transcript for voice cloning (Base task)
+- `--ref-audio`: Reference audio file path or URL for voice cloning (Base task). Local paths are automatically base64-encoded by the client before sending to the server.
+- `--ref-text`: Reference audio transcript for voice cloning (Base task).
 - `--response-format`: Audio output format (default: `wav`). Options: `wav`, `mp3`, `flac`, `pcm`, `aac`, `opus`
 - `--output` (or `-o`): Output audio file path (default: `tts_output.wav`)
 
@@ -150,7 +159,7 @@ curl -X POST http://localhost:8091/v1/audio/speech \
     -H "Content-Type: application/json" \
     -d '{
         "input": "Hello, how are you?",
-        "speaker": "vivian",
+        "voice": "vivian",
         "language": "English"
     }' --output output.wav
 
@@ -159,7 +168,7 @@ curl -X POST http://localhost:8091/v1/audio/speech \
     -H "Content-Type: application/json" \
     -d '{
         "input": "I am so excited!",
-        "speaker": "vivian",
+        "voice": "vivian",
         "instructions": "Speak with great enthusiasm"
     }' --output excited.wav
 
@@ -176,7 +185,7 @@ client = OpenAI(base_url="http://localhost:8091/v1", api_key="none")
 
 response = client.audio.speech.create(
     model="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
-    speaker="vivian",
+    voice="vivian",
     input="Hello, how are you?",
 )
 
@@ -192,7 +201,7 @@ response = httpx.post(
     "http://localhost:8091/v1/audio/speech",
     json={
         "input": "Hello, how are you?",
-        "speaker": "vivian",
+        "voice": "vivian",
         "language": "English",
     },
     timeout=300.0,
@@ -200,14 +209,6 @@ response = httpx.post(
 
 with open("output.wav", "wb") as f:
     f.write(response.content)
-```
-
-### FAQ
-
-If you encounter error about backend of librosa, try to install ffmpeg with command below.
-```
-sudo apt update
-sudo apt install ffmpeg
 ```
 
 ## API Reference
@@ -228,11 +229,15 @@ List all available voices/speakers from the loaded model, including both built-i
       "consent": "user_consent_id",
       "created_at": 1738660000,
       "file_size": 1024000,
-      "mime_type": "audio/wav"
+      "mime_type": "audio/wav",
+      "ref_text": "The exact transcript of the audio sample.",
+      "speaker_description": "warm narrator"
     }
   ]
 }
 ```
+
+Fields `ref_text` and `speaker_description` are omitted per-entry when not provided at upload time.
 
 #### POST /v1/audio/voices
 
@@ -242,6 +247,8 @@ Upload a new voice sample for voice cloning in Base task TTS requests.
 - `audio_sample` (required): Audio file (max 10MB, supported formats: wav, mp3, flac, ogg, aac, webm, mp4)
 - `consent` (required): Consent recording ID
 - `name` (required): Name for the new voice
+- `ref_text` (optional): Transcript of the audio. Enables in-context voice cloning (higher quality).
+- `speaker_description` (optional): Free-form description of the voice (e.g. "warm narrator", "energetic presenter"). Stored as metadata.
 
 **Response Example:**
 ```json
@@ -252,17 +259,23 @@ Upload a new voice sample for voice cloning in Base task TTS requests.
     "consent": "user_consent_id",
     "created_at": 1738660000,
     "mime_type": "audio/wav",
-    "file_size": 1024000
+    "file_size": 1024000,
+    "ref_text": "The exact transcript of the audio sample.",
+    "speaker_description": "warm narrator"
   }
 }
 ```
 
+Fields `ref_text` and `speaker_description` are omitted when not provided at upload time.
+
 **Usage Example:**
 ```bash
-curl -X POST http://localhost:8000/v1/audio/voices \
+curl -X POST http://localhost:8091/v1/audio/voices \
   -F "audio_sample=@/path/to/voice_sample.wav" \
   -F "consent=user_consent_id" \
-  -F "name=custom_voice_1"
+  -F "name=custom_voice_1" \
+  -F "ref_text=The exact transcript of the audio sample." \
+  -F "speaker_description=warm narrator"
 ```
 
 ### Endpoint
@@ -279,12 +292,12 @@ This endpoint follows the [OpenAI Audio Speech API](https://platform.openai.com/
 ```json
 {
     "input": "Text to synthesize",
-    "speaker": "vivian",
+    "voice": "vivian",
     "response_format": "wav",
     "task_type": "CustomVoice",
     "language": "Auto",
     "instructions": "Optional style instructions",
-    "ref_audio": "URL or base64 for voice cloning",
+    "ref_audio":  "HTTP URL, base64 data URL, or file:// URI for voice cloning",
     "ref_text": "Reference audio transcript",
     "x_vector_only_mode": false,
     "max_new_tokens": 2048
@@ -299,7 +312,7 @@ Returns binary audio data with appropriate `Content-Type` header (e.g., `audio/w
 
 ### Voice and language (summary)
 
-- **Speaker**: Use the `speaker` request field to select the speaker (e.g., `vivian`, `ryan`, `aiden`). List available speakers with `GET /v1/audio/voices`.
+- **Speaker**: Use the `voice` request field to select the speaker (e.g., `vivian`, `ryan`, `aiden`). List available speakers with `GET /v1/audio/voices`.
 - **Language**: Use the `language` field for the codec language tag (`Auto`, `Chinese`, `English`, etc.). Default is `Auto` for automatic detection.
 - **CustomVoice**: Requires a valid `voice` from the model’s speaker set. **VoiceDesign**: Use `instructions` to describe the voice. **Base**: Use `ref_audio` and `ref_text` for voice cloning.
 
@@ -311,30 +324,30 @@ Returns binary audio data with appropriate `Content-Type` header (e.g., `audio/w
 | ----------------- | ------ | -------------- | ----------------------------------------------------------- |
 | `input`           | string | **required**   | Text to synthesize                                          |
 | `model`           | string | server's model | Model to use (optional, should match server if specified)   |
-| `speaker`         | string | "vivian"       | Speaker name (e.g., vivian, ryan, aiden)                    |
+| `voice`           | string | "vivian"       | Speaker name (e.g., vivian, ryan, aiden)                    |
 | `response_format` | string | "wav"          | Audio format: wav, mp3, flac, pcm, aac, opus                |
 | `speed`           | float  | 1.0            | Playback speed (0.25-4.0, not supported with `stream=true`) |
 
 ### vLLM-Omni Extension Parameters
 
-| Parameter        | Type   | Default       | Description                                                                  |
-| ---------------- | ------ | ------------- | ---------------------------------------------------------------------------- |
-| `task_type`      | string | "CustomVoice" | Task: CustomVoice, VoiceDesign, or Base                                      |
-| `language`       | string | "Auto"        | Language (see supported languages below)                                     |
-| `instructions`   | string | ""            | Voice style/emotion instructions                                             |
-| `max_new_tokens` | int    | 2048          | Maximum tokens to generate                                                   |
-| `initial_codec_chunk_frames` | int | null | Per-request initial chunk size override for TTFA tuning. When null, IC is computed dynamically based on server load. |
-| `stream`         | bool   | false         | Stream raw PCM chunks as they are decoded (requires `response_format="pcm"`) |
+| Parameter                    | Type   | Default       | Description                                                                                                          |
+| ---------------------------- | ------ | ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `task_type`                  | string | "CustomVoice" | Task: CustomVoice, VoiceDesign, or Base                                                                              |
+| `language`                   | string | "Auto"        | Language (see supported languages below)                                                                             |
+| `instructions`               | string | ""            | Voice style/emotion instructions                                                                                     |
+| `max_new_tokens`             | int    | 2048          | Maximum tokens to generate                                                                                           |
+| `initial_codec_chunk_frames` | int    | null          | Per-request initial chunk size override for TTFA tuning. When null, IC is computed dynamically based on server load. |
+| `stream`                     | bool   | false         | Stream raw PCM chunks as they are decoded (requires `response_format="pcm"`)                                         |
 
 **Supported languages:** Auto, Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian
 
 ### Voice Clone Parameters (Base task)
 
-| Parameter            | Type   | Required | Description                                  |
-| -------------------- | ------ | -------- | -------------------------------------------- |
-| `ref_audio`          | string | **Yes**  | Reference audio (URL or base64 data URL)     |
-| `ref_text`           | string | No       | Transcript of reference audio (for ICL mode) |
-| `x_vector_only_mode` | bool   | No       | Use speaker embedding only (no ICL)          |
+| Parameter            | Type   | Required | Description                                                                                     |
+| -------------------- | ------ | -------- | ----------------------------------------------------------------------------------------------- |
+| `ref_audio`          | string | **Yes**  | Reference audio (HTTP URL, base64 data URL, or `file://` URI with `--allowed-local-media-path`) |
+| `ref_text`           | string | No       | Transcript of reference audio (for ICL mode)                                                    |
+| `x_vector_only_mode` | bool   | No       | Use speaker embedding only (no ICL)                                                             |
 
 ## Streaming
 
@@ -346,7 +359,7 @@ curl -X POST http://localhost:8091/v1/audio/speech \
     -H "Content-Type: application/json" \
     -d '{
         "input": "Hello, how are you?",
-        "speaker": "vivian",
+        "voice": "vivian",
         "language": "English",
         "stream": true,
         "response_format": "pcm"

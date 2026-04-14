@@ -62,6 +62,28 @@ def build_actions(preset_name: str, num_frames: int) -> tuple[list, list]:
     return [keyboard] * num_frames, [mouse] * num_frames
 
 
+def parse_reference_action_list(action_list: list) -> tuple[list, list]:
+    """Parse Micro-World reference action_list format.
+
+    Format: ``[[end_frame, "w s a d shift ctrl _ mouse_y mouse_x"], ..., "space_frames"]``
+    e.g.  ``[[20, "1 0 0 0 0 0 0 0 0"], [40, "0 1 0 0 0 0 0 0 5"], "30 60"]``
+
+    Returns: ``(keyboard_actions, mouse_actions)`` as per-frame lists.
+    """
+    keyboard = [[0, 0, 0, 0, 0, 0, 0]]
+    mouse = [[0.0, 0.0]]
+    space_frames = set(map(int, action_list[-1].split())) if action_list[-1] else set()
+
+    for i in range(len(action_list) - 1):
+        end_frame, action = action_list[i]
+        w, s, a, d, shift, ctrl, _unused, my, mx = map(float, action.split())
+        start_frame = 1 if i == 0 else action_list[i - 1][0] + 1
+        for frame in range(start_frame, int(end_frame) + 1):
+            keyboard.append([int(w), int(s), int(a), int(d), int(frame in space_frames), int(shift), int(ctrl)])
+            mouse.append([float(my), float(mx)])
+    return keyboard, mouse
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="AMD Micro-World T2W generation.")
     parser.add_argument("--model", required=True, help="Combined model directory path.")
@@ -71,6 +93,14 @@ def parse_args():
     parser.add_argument("--negative-prompt", default="")
     parser.add_argument("--actions", default="walk_forward", help="Action preset (e.g. 'walk_forward+look_right').")
     parser.add_argument("--action-file", default=None, help="JSON file with {mouse_actions, keyboard_actions}.")
+    parser.add_argument(
+        "--action-list",
+        default=None,
+        help=(
+            "Micro-World reference action_list as JSON string, e.g. "
+            '\'[[20, "1 0 0 0 0 0 0 0 0"], [40, "0 1 0 0 0 0 0 0 5"], "30 60"]\''
+        ),
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--height", type=int, default=352)
     parser.add_argument("--width", type=int, default=640)
@@ -80,6 +110,12 @@ def parse_args():
     parser.add_argument("--flow-shift", type=float, default=3.0)
     parser.add_argument("--fps", type=int, default=15)
     parser.add_argument("--output", type=str, default="micro_world_t2w_output.mp4")
+    parser.add_argument(
+        "--stage-init-timeout",
+        type=int,
+        default=3000,
+        help="Stage init timeout in seconds (raise for slow filesystems).",
+    )
     return parser.parse_args()
 
 
@@ -91,6 +127,8 @@ def main():
             action_data = json.load(f)
         keyboard_actions = action_data["keyboard_actions"]
         mouse_actions = action_data["mouse_actions"]
+    elif args.action_list:
+        keyboard_actions, mouse_actions = parse_reference_action_list(json.loads(args.action_list))
     else:
         keyboard_actions, mouse_actions = build_actions(args.actions, args.num_frames)
 
@@ -98,7 +136,13 @@ def main():
     stage_config = str(
         Path(__file__).resolve().parents[3] / "vllm_omni" / "model_executor" / "stage_configs" / "micro_world_t2w.yaml"
     )
-    omni = Omni(model=args.model, stage_configs_path=stage_config, flow_shift=args.flow_shift)
+    omni = Omni(
+        model=args.model,
+        stage_configs_path=stage_config,
+        flow_shift=args.flow_shift,
+        stage_init_timeout=args.stage_init_timeout,
+        init_timeout=args.stage_init_timeout,
+    )
 
     prompt_dict = {"prompt": args.prompt}
     if args.negative_prompt:

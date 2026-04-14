@@ -170,7 +170,7 @@ class ActionModule(nn.Module):
 
         # Add sinusoidal positional encoding
         positions = torch.arange(keyboard_emb.size(1), device=keyboard_emb.device)
-        pos_enc = sinusoidal_embedding_1d(keyboard_emb.shape[-1], positions)
+        pos_enc = sinusoidal_embedding_1d(keyboard_emb.shape[-1], positions).to(dtype=keyboard_emb.dtype)
         pos_enc = pos_enc.unsqueeze(0).expand(keyboard_emb.size(0), -1, -1)
         keyboard_emb = keyboard_emb + pos_enc
 

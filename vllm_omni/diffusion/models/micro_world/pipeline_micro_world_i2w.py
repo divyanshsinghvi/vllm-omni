@@ -285,6 +285,13 @@ class MicroWorldI2WPipeline(
     def current_timestep(self):
         return self._current_timestep
 
+    def load_weights(self, weights):
+        """Load weights using AutoWeightsLoader for vLLM integration."""
+        from vllm.model_executor.models.utils import AutoWeightsLoader
+
+        loader = AutoWeightsLoader(self)
+        return loader.load_weights(weights)
+
     def encode_prompt(
         self,
         prompt: str | list[str],

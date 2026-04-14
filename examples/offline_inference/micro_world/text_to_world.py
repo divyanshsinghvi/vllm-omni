@@ -95,7 +95,10 @@ def main():
         keyboard_actions, mouse_actions = build_actions(args.actions, args.num_frames)
 
     generator = torch.Generator(device=current_omni_platform.device_type).manual_seed(args.seed)
-    omni = Omni(model=args.model, flow_shift=args.flow_shift)
+    stage_config = str(
+        Path(__file__).resolve().parents[3] / "vllm_omni" / "model_executor" / "stage_configs" / "micro_world_t2w.yaml"
+    )
+    omni = Omni(model=args.model, stage_configs_path=stage_config, flow_shift=args.flow_shift)
 
     prompt_dict = {"prompt": args.prompt}
     if args.negative_prompt:

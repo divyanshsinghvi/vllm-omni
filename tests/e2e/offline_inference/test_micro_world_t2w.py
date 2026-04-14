@@ -18,7 +18,7 @@ from vllm_omni.platforms import current_omni_platform
 
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
-models = ["amd/Micro-World-T2W"]
+models = [os.environ.get("MICRO_WORLD_T2W_MODEL", "amd/Micro-World-T2W")]
 
 
 # ── Unit tests ───────────────────────────────────────────────────────────
@@ -121,9 +121,15 @@ def test_action_module_mouse_sensitivity():
 @pytest.mark.parametrize("model_name", models)
 def test_micro_world_t2w_generation(model_name: str):
     """E2E test: generate action-controlled video via Omni entrypoint."""
+    stage_config = str(
+        Path(__file__).resolve().parents[3] / "vllm_omni" / "model_executor" / "stage_configs" / "micro_world_t2w.yaml"
+    )
     m = Omni(
         model=model_name,
+        stage_configs_path=stage_config,
         flow_shift=3.0,
+        stage_init_timeout=3000,
+        init_timeout=3000,
     )
 
     height = 352

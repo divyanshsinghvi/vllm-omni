@@ -221,6 +221,13 @@ class MicroWorldT2WPipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, Diffu
     def current_timestep(self):
         return self._current_timestep
 
+    def load_weights(self, weights):
+        """Load weights using AutoWeightsLoader for vLLM integration."""
+        from vllm.model_executor.models.utils import AutoWeightsLoader
+
+        loader = AutoWeightsLoader(self)
+        return loader.load_weights(weights)
+
     def encode_prompt(
         self,
         prompt: str | list[str],
@@ -302,19 +309,25 @@ class MicroWorldT2WPipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, Diffu
         extra_args: dict[str, Any] | None,
         device: torch.device,
         dtype: torch.dtype,
+        num_action_frames: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Extract and validate action tensors from extra_args."""
-        if extra_args is None:
-            raise ValueError(
-                "mouse_actions and keyboard_actions are required for Micro-World T2W generation. "
-                "Pass them via extra_params in the request."
-            )
+        """Extract action tensors from extra_args.
 
-        mouse_actions = extra_args.get("mouse_actions")
-        keyboard_actions = extra_args.get("keyboard_actions")
+        If actions are missing and ``num_action_frames`` is given, returns
+        zero-filled defaults (used for warmup / dummy run, where actions
+        are not meaningful).
+        """
+        mouse_actions = extra_args.get("mouse_actions") if extra_args else None
+        keyboard_actions = extra_args.get("keyboard_actions") if extra_args else None
 
         if mouse_actions is None or keyboard_actions is None:
-            raise ValueError("Both 'mouse_actions' and 'keyboard_actions' must be provided in extra_params.")
+            if num_action_frames is not None:
+                # Warmup path: supply zero-filled no-op actions so the model
+                # can still trace its forward pass.
+                mouse_actions = torch.zeros((num_action_frames, 2), dtype=dtype, device=device)
+                keyboard_actions = torch.zeros((num_action_frames, 7), dtype=dtype, device=device)
+            else:
+                raise ValueError("Both 'mouse_actions' and 'keyboard_actions' must be provided in extra_params.")
 
         # Convert to tensors if needed
         if not isinstance(mouse_actions, torch.Tensor):
@@ -407,9 +420,13 @@ class MicroWorldT2WPipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, Diffu
         if generator is None and req.sampling_params.seed is not None:
             generator = torch.Generator(device=device).manual_seed(req.sampling_params.seed)
 
-        # Parse actions
+        # Parse actions (num_action_frames = temporal_ratio * latent_frames + 1)
         extra_args = req.sampling_params.extra_args if hasattr(req.sampling_params, "extra_args") else None
-        mouse_actions, keyboard_actions = self._parse_actions(extra_args, device, dtype)
+        num_latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
+        num_action_frames = num_latent_frames * self.vae_scale_factor_temporal + 1
+        mouse_actions, keyboard_actions = self._parse_actions(
+            extra_args, device, dtype, num_action_frames=num_action_frames
+        )
 
         # Encode prompt
         if prompt_embeds is None:

@@ -433,9 +433,14 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
             # modulation → scale_shift_table (only for blocks, not action module)
             if ".modulation." in name and "action_preprocess" not in name:
                 name = name.replace(".modulation.", ".scale_shift_table.")
+            # Scalar `blocks.N.modulation` (no trailing dot) → `blocks.N.scale_shift_table`
+            if name.endswith(".modulation") and "action_preprocess" not in name:
+                name = name[: -len(".modulation")] + ".scale_shift_table"
+            # norm3 → norm2 (Wan2.1 block rename in diffusers port)
+            name = name.replace(".norm3.", ".norm2.")
 
             # Apply global remapping
-            for old, new in weight_name_remapping.items():
+            for old, new in weight_name_remapping:
                 name = name.replace(old, new)
 
             lookup_name = name
@@ -455,14 +460,15 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
                 break
 
             if not fused:
-                # ffn renaming: ffn.0 → ffn.net_0, ffn.2 → ffn.net_2
+                # ffn renaming: ffn.0 → ffn.net_0.proj, ffn.2 → ffn.net_2
+                # (ffn.0 is a Linear wrapped as GELU-activated FFN's first proj)
                 if ".ffn.0." in lookup_name:
-                    lookup_name = lookup_name.replace(".ffn.0.", ".ffn.net_0.")
+                    lookup_name = lookup_name.replace(".ffn.0.", ".ffn.net_0.proj.")
                 elif ".ffn.2." in lookup_name:
                     lookup_name = lookup_name.replace(".ffn.2.", ".ffn.net_2.")
                 # diffusers-style ffn renaming
                 if ".ffn.net.0." in lookup_name:
-                    lookup_name = lookup_name.replace(".ffn.net.0.", ".ffn.net_0.")
+                    lookup_name = lookup_name.replace(".ffn.net.0.", ".ffn.net_0.proj.")
                 elif ".ffn.net.2." in lookup_name:
                     lookup_name = lookup_name.replace(".ffn.net.2.", ".ffn.net_2.")
                 if ".to_out.0." in lookup_name:

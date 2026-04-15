@@ -49,7 +49,12 @@ _ACTION_PRESETS = {
 
 
 def build_actions(preset_name: str, num_frames: int) -> tuple[list, list]:
-    """Build action lists from a preset name (supports '+' combos like 'walk_forward+look_right')."""
+    """Build action lists from a preset name (supports '+' combos like 'walk_forward+look_right').
+
+    Frame 0 is always the no-op state ``[0,0,0,0,0,0,0]`` / ``[0,0]`` to match the
+    reference Micro-World ``parse_action_list`` convention; the action applies
+    from frame 1 onward.
+    """
     keyboard = [0] * 7
     mouse = [0.0, 0.0]
     for part in preset_name.split("+"):
@@ -59,7 +64,9 @@ def build_actions(preset_name: str, num_frames: int) -> tuple[list, list]:
         p = _ACTION_PRESETS[part]
         keyboard = [max(a, b) for a, b in zip(keyboard, p["keyboard"])]
         mouse = [a + b for a, b in zip(mouse, p["mouse"])]
-    return [keyboard] * num_frames, [mouse] * num_frames
+    keyboard_frames = [[0] * 7] + [keyboard] * (num_frames - 1)
+    mouse_frames = [[0.0, 0.0]] + [mouse] * (num_frames - 1)
+    return keyboard_frames, mouse_frames
 
 
 def parse_reference_action_list(action_list: list) -> tuple[list, list]:

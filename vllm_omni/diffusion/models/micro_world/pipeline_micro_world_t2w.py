@@ -165,11 +165,15 @@ class MicroWorldT2WPipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, Diffu
 
         # Check for LoRA weights at model root — merged into transformer
         # weights at the end of load_weights().
+        # Skip via MICRO_WORLD_SKIP_LORA=1 for debugging the LoRA-free baseline.
         self._lora_path: str | None = None
         lora_path = os.path.join(model, "lora_diffusion_pytorch_model.safetensors") if local_files_only else None
         if lora_path and os.path.exists(lora_path):
-            logger.info(f"Found LoRA weights at {lora_path}")
-            self._lora_path = lora_path
+            if os.environ.get("MICRO_WORLD_SKIP_LORA") == "1":
+                logger.info(f"Skipping LoRA weights at {lora_path} (MICRO_WORLD_SKIP_LORA=1)")
+            else:
+                logger.info(f"Found LoRA weights at {lora_path}")
+                self._lora_path = lora_path
         self._lora_weight: float = 1.0
 
         # Text encoder
@@ -408,36 +412,35 @@ class MicroWorldT2WPipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, Diffu
         prompt = [prompt] if isinstance(prompt, str) else prompt
         batch_size = len(prompt)
 
-        text_inputs = self.tokenizer(
-            prompt,
-            padding="max_length",
-            max_length=max_sequence_length,
-            truncation=True,
-            add_special_tokens=True,
-            return_tensors="pt",
-        )
-        text_input_ids = text_inputs.input_ids.to(device)
-        attention_mask = text_inputs.attention_mask.to(device)
-
-        prompt_embeds = self.text_encoder(text_input_ids, attention_mask=attention_mask)[0]
-        prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
-
-        negative_prompt_embeds = None
-        if do_classifier_free_guidance:
-            negative_prompt = negative_prompt or ""
-            negative_prompt = batch_size * [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
-            neg_inputs = self.tokenizer(
-                negative_prompt,
+        def _encode(text_list):
+            inputs = self.tokenizer(
+                text_list,
                 padding="max_length",
                 max_length=max_sequence_length,
                 truncation=True,
                 add_special_tokens=True,
                 return_tensors="pt",
             )
-            neg_input_ids = neg_inputs.input_ids.to(device)
-            neg_mask = neg_inputs.attention_mask.to(device)
-            negative_prompt_embeds = self.text_encoder(neg_input_ids, attention_mask=neg_mask)[0]
-            negative_prompt_embeds = negative_prompt_embeds.to(dtype=dtype, device=device)
+            input_ids = inputs.input_ids.to(device)
+            mask = inputs.attention_mask.to(device)
+            embeds = self.text_encoder(input_ids, attention_mask=mask)[0].to(dtype=dtype, device=device)
+            # Trim to actual non-padding length per item — matches reference T5
+            # behavior. With padding tokens left in, cross-attention spreads
+            # mass over 500+ garbage tokens and dilutes prompt conditioning.
+            seq_lens = mask.gt(0).sum(dim=1).long().tolist()
+            if len(text_list) == 1:
+                return embeds[:1, : seq_lens[0]]
+            # Batch>1: trim to longest non-padding length so it stays one tensor.
+            max_len = max(seq_lens) if seq_lens else 1
+            return embeds[:, :max_len]
+
+        prompt_embeds = _encode(prompt)
+
+        negative_prompt_embeds = None
+        if do_classifier_free_guidance:
+            negative_prompt = negative_prompt or ""
+            negative_prompt = batch_size * [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
+            negative_prompt_embeds = _encode(negative_prompt)
 
         return prompt_embeds, negative_prompt_embeds
 
@@ -601,6 +604,24 @@ class MicroWorldT2WPipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, Diffu
                 dtype=dtype,
             )
 
+        # ---- DEBUG DUMPS ----
+        _dump_dir = os.environ.get("MICRO_WORLD_DUMP_DIR")
+        if _dump_dir:
+            from pathlib import Path
+
+            _dd = Path(_dump_dir)
+            _dd.mkdir(parents=True, exist_ok=True)
+            torch.save(prompt_embeds.detach().cpu(), _dd / "prompt_embeds.pt")
+            if negative_prompt_embeds is not None:
+                torch.save(negative_prompt_embeds.detach().cpu(), _dd / "neg_prompt_embeds.pt")
+            torch.save(mouse_actions.detach().cpu(), _dd / "mouse_actions.pt")
+            torch.save(keyboard_actions.detach().cpu(), _dd / "keyboard_actions.pt")
+            logger.info(
+                "DUMP: prompt_embeds shape=%s, neg=%s",
+                tuple(prompt_embeds.shape),
+                tuple(negative_prompt_embeds.shape) if negative_prompt_embeds is not None else None,
+            )
+
         # Prepare latents
         num_channels_latents = self.transformer_config.in_channels
         latents = self.prepare_latents(
@@ -613,6 +634,14 @@ class MicroWorldT2WPipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, Diffu
             device=device,
             generator=generator,
         )
+        if _dump_dir:
+            torch.save(latents.detach().cpu(), _dd / "initial_latents.pt")
+            logger.info(
+                "DUMP: initial_latents shape=%s mean=%.4f std=%.4f",
+                tuple(latents.shape),
+                float(latents.float().mean()),
+                float(latents.float().std()),
+            )
 
         # Timesteps
         self.scheduler.set_timesteps(num_steps, device=device)
@@ -623,7 +652,9 @@ class MicroWorldT2WPipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, Diffu
 
         # Denoising loop
         with self.progress_bar(total=len(timesteps)) as pbar:
-            for t in timesteps:
+            for _step_idx, t in enumerate(timesteps):
+                if _dump_dir and (_step_idx % 5 == 0 or _step_idx == len(timesteps) - 1):
+                    torch.save(latents.detach().cpu(), _dd / f"latent_step_{_step_idx:02d}.pt")
                 self._current_timestep = t
                 latent_model_input = latents.to(dtype)
                 timestep = t.expand(latents.shape[0])
@@ -688,6 +719,9 @@ class MicroWorldT2WPipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, Diffu
             )
             latents = latents / latents_std + latents_mean
             output = self.vae.decode(latents, return_dict=False)[0]
+            if _dump_dir:
+                torch.save(output.detach().cpu(), _dd / "frames.pt")
+                logger.info("DUMP: frames shape=%s", tuple(output.shape))
 
         return DiffusionOutput(
             output=output,

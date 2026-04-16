@@ -19,6 +19,7 @@ from vllm_omni.model_executor.stage_input_processors.tts_utils import (
     extract_speaker_from_request,
 )
 
+
 def _compute_talker_prompt_ids_length(info: OmniPayload, device: torch.device | str = "cuda") -> int:
     im_start_token_id = 151644
     system_token_id = 8948

@@ -19,8 +19,6 @@ from vllm_omni.model_executor.stage_input_processors.tts_utils import (
     extract_speaker_from_request,
 )
 
-
-
 def _compute_talker_prompt_ids_length(info: OmniPayload, device: torch.device | str = "cuda") -> int:
     im_start_token_id = 151644
     system_token_id = 8948
@@ -304,7 +302,6 @@ def talker2code2wav_async_chunk(
     request_id = request.external_req_id
     transfer_manager.code_prompt_token_ids[request_id].append(codec_codes)
     length = len(transfer_manager.code_prompt_token_ids[request_id])
-
 
     chunk_length = length % chunk_size_config
     if chunk_length != 0 and not is_finished:

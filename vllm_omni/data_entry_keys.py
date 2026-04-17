@@ -114,6 +114,8 @@ def flatten_payload(payload: dict[str, Any]) -> dict[str, Any]:
     ``hidden_states["layers"]`` is expanded to ``hidden_states.layer_N``.
     Top-level values are kept as-is.
     """
+    if not payload:
+        return {}
     flat: dict[str, Any] = {}
     for key, value in payload.items():
         if key in _NESTED_KEYS and isinstance(value, dict):

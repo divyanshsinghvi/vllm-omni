@@ -181,6 +181,11 @@ class Qwen3OmniMoeForConditionalGeneration(
                 ("hidden_states", "trailing_text"),
                 ("embed", "tts_pad_projected"),
             }
+            # Keys that need to be accumulated across streaming inputs
+            self.streaming_accumulated_keys: set[str] = {
+                "thinker_prefill_embeddings",
+                "thinker_hidden_states",
+            }
 
         elif self.model_stage == "code2wav":
             self.enable_update_additional_information = True

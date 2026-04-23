@@ -126,6 +126,18 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         with self._save_cond:
             self._save_cond.notify()
 
+    def _recv_accum(self, req_id: str) -> dict[str, float]:
+        if not hasattr(self, "_recv_timings"):
+            self._recv_timings: dict[str, dict[str, float]] = {}
+        return self._recv_timings.setdefault(req_id, {"count": 0.0, "get_ms": 0.0, "update_ms": 0.0})
+
+    def _send_accum(self, req_id: str) -> dict[str, float]:
+        if not hasattr(self, "_send_timings"):
+            self._send_timings: dict[str, dict[str, float]] = {}
+        return self._send_timings.setdefault(
+            req_id, {"count": 0.0, "unflatten_ms": 0.0, "custom_ms": 0.0, "put_ms": 0.0}
+        )
+
     def _poll_single_request(self, request: Request):
         stage_id = self.connector.stage_id
         target_stage_id = stage_id - 1
@@ -187,14 +199,21 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             # Mark as finished for consumption
             self._finished_load_reqs.add(req_id)
             logger.debug(f"[Stage-{stage_id}] Received one chunk for key {connector_get_key}")
-            logger.info(
-                "[chunk-time] stage=%s side=recv req=%s chunk=%s get_ms=%.3f update_ms=%.3f",
-                stage_id,
-                external_req_id,
-                chunk_id,
-                _dt_get_ms,
-                _dt_update_ms,
-            )
+
+            accum = self._recv_accum(external_req_id)
+            accum["count"] += 1
+            accum["get_ms"] += _dt_get_ms
+            accum["update_ms"] += _dt_update_ms
+            if meta.get("finished"):
+                logger.info(
+                    "[chunk-time-summary] stage=%s side=recv req=%s chunks=%d get_ms_total=%.3f update_ms_total=%.3f",
+                    stage_id,
+                    external_req_id,
+                    int(accum["count"]),
+                    accum["get_ms"],
+                    accum["update_ms"],
+                )
+                self._recv_timings.pop(external_req_id, None)
             return True
 
         return False
@@ -280,16 +299,12 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             data=payload_data,
         )
         _dt_put_ms = (time.perf_counter() - _t_put) * 1000.0
-        logger.info(
-            "[chunk-time] stage=%s side=send req=%s chunk=%s unflatten_ms=%.3f custom_ms=%.3f put_ms=%.3f finished=%s",
-            stage_id,
-            external_req_id,
-            chunk_id,
-            _dt_unflatten_ms,
-            _dt_custom_ms,
-            _dt_put_ms,
-            is_finished,
-        )
+
+        accum = self._send_accum(external_req_id)
+        accum["count"] += 1
+        accum["unflatten_ms"] += _dt_unflatten_ms
+        accum["custom_ms"] += _dt_custom_ms
+        accum["put_ms"] += _dt_put_ms
 
         if success:
             self.put_req_chunk[external_req_id] += 1
@@ -304,6 +319,18 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             # Reclaim per-request async state only after the terminal payload
             # has been sent successfully. This avoids cleanup->save races.
             if is_payload_finished:
+                if external_req_id in getattr(self, "_send_timings", {}):
+                    summary = self._send_timings.pop(external_req_id)
+                    logger.info(
+                        "[chunk-time-summary] stage=%s side=send req=%s chunks=%d "
+                        "unflatten_ms_total=%.3f custom_ms_total=%.3f put_ms_total=%.3f",
+                        stage_id,
+                        external_req_id,
+                        int(summary["count"]),
+                        summary["unflatten_ms"],
+                        summary["custom_ms"],
+                        summary["put_ms"],
+                    )
                 self.cleanup(request.request_id, external_req_id)
 
         if is_finished:

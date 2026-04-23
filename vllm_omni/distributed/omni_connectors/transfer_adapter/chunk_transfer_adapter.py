@@ -8,8 +8,6 @@ from typing import Any
 import torch
 from vllm.v1.request import Request, RequestStatus
 
-from vllm_omni.data_entry_keys import unflatten_payload
-
 from ..factory import OmniConnectorFactory
 from ..utils.config import ConnectorSpec
 from ..utils.logging import get_connector_logger
@@ -228,7 +226,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
 
     def _send_single_request(self, task: dict):
         raw_po = task["pooling_output"]
-        pooling_output = unflatten_payload(raw_po) if isinstance(raw_po, dict) else raw_po
+        pooling_output = raw_po
         request = task["request"]
         is_finished = task["is_finished"]
         stage_id = self.connector.stage_id

@@ -31,10 +31,23 @@ def build_mm_cpu(multimodal_outputs: dict) -> dict[str, object]:
             if isinstance(v, torch.Tensor):
                 mm_cpu[k] = v.detach().to("cpu").contiguous()
             elif isinstance(v, dict):
-                sub_dict: dict[str, torch.Tensor] = {}
+                sub_dict: dict[str, object] = {}
                 for sk, sv in v.items():
                     if isinstance(sv, torch.Tensor):
                         sub_dict[str(sk)] = sv.detach().to("cpu").contiguous()
+                    elif isinstance(sv, dict):
+                        inner: dict[object, torch.Tensor] = {}
+                        for isk, isv in sv.items():
+                            if isinstance(isv, torch.Tensor):
+                                inner[isk] = isv.detach().to("cpu").contiguous()
+                        if inner:
+                            sub_dict[str(sk)] = inner
+                    elif isinstance(sv, list) and len(sv) > 0:
+                        sub_dict[str(sk)] = [
+                            e.detach().to("cpu").contiguous() if isinstance(e, torch.Tensor) else e for e in sv
+                        ]
+                    elif sv is not None:
+                        sub_dict[str(sk)] = sv
                 if sub_dict:
                     mm_cpu[k] = sub_dict
             elif isinstance(v, list) and len(v) > 0:
@@ -77,7 +90,7 @@ def to_payload_element(
     # Every other case is shared between prefix cache (passthrough data)
     # and running a model without prefix caching.
     elif isinstance(element, dict):
-        return {sk: sv[start:end].contiguous() for sk, sv in element.items()}
+        return {sk: to_payload_element(sv, idx, start, end, pass_lists_through, seq_len) for sk, sv in element.items()}
     elif isinstance(element, list):
         # For lists, clone tensors to avoid cross-request aliasing
         if pass_lists_through:

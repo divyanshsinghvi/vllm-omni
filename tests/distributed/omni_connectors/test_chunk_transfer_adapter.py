@@ -177,7 +177,7 @@ def test_update_request_payload(build_adapter):
     assert merged["meta"]["finished"].item() is True
 
 
-def test_load_poll_ar_request_additional_information_uses_merged_payload(build_adapter):
+def test_load_poll_ar_request_additional_information_concats_tensors(build_adapter):
     adapter, connector = build_adapter(stage_id=2, model_mode="ar")
     request = _req("req-merged", RequestStatus.WAITING, external_req_id="ext-merged")
 
@@ -199,7 +199,8 @@ def test_load_poll_ar_request_additional_information_uses_merged_payload(build_a
         request.additional_information["hidden_states"]["output"],
         torch.tensor([[1.0], [2.0]]),
     )
-    assert request.additional_information["ids"]["prompt"] == [11, 12]
+    # Keys absent from the new chunk are dropped (matches main's behavior).
+    assert "ids" not in request.additional_information
     assert request.additional_information["meta"]["finished"].item() is True
 
 

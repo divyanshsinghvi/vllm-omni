@@ -1466,22 +1466,27 @@ class OmniGPUModelRunner(GPUModelRunner):
             payload_info = getattr(new_req_data, "additional_information", None)
             inc_info = deserialize_additional_information(payload_info)
             if isinstance(inc_info, dict) and inc_info:
+                accumulated_keys: set[tuple[str, str]] = set()
+                if hasattr(self, "model") and hasattr(self.model, "streaming_accumulated_keys"):
+                    accumulated_keys = self.model.streaming_accumulated_keys
                 merged_info = dict(cached_additional_info)
                 for key, value in inc_info.items():
-                    accumulated_keys: set[str] = set()
-                    if hasattr(self, "model") and hasattr(self.model, "streaming_accumulated_keys"):
-                        accumulated_keys = self.model.streaming_accumulated_keys
-                    if key in accumulated_keys and isinstance(value, torch.Tensor):
-                        inc_tensor = value.detach().to("cpu").contiguous()
-                        old_tensor = merged_info.get(key)
-                        if old_tensor is None:
-                            merged_info[key] = inc_tensor
-                        else:
-                            merged_info[key] = torch.cat((old_tensor, inc_tensor), dim=0)
-                        continue
-
-                    # Default for other keys: latest value.
-                    merged_info[key] = value
-                merged_info["num_processed_tokens"] = 0
+                    if isinstance(value, dict):
+                        existing_sub = merged_info.get(key)
+                        merged_sub = dict(existing_sub) if isinstance(existing_sub, dict) else {}
+                        for sk, sv in value.items():
+                            if (key, sk) in accumulated_keys and isinstance(sv, torch.Tensor):
+                                inc_tensor = sv.detach().to("cpu").contiguous()
+                                old_tensor = merged_sub.get(sk)
+                                if old_tensor is None:
+                                    merged_sub[sk] = inc_tensor
+                                else:
+                                    merged_sub[sk] = torch.cat((old_tensor, inc_tensor), dim=0)
+                            else:
+                                merged_sub[sk] = sv
+                        merged_info[key] = merged_sub
+                    else:
+                        merged_info[key] = value
+                merged_info.setdefault("meta", {})["num_processed_tokens"] = 0
                 self.model_intermediate_buffer[req_id] = merged_info
                 setattr(self.requests[req_id], "additional_information_cpu", merged_info)

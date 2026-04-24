@@ -164,14 +164,26 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
 
                 new_ids = payload_data.get("codes", {}).get("audio", [])
                 request.prompt_token_ids = new_ids
-                # Only pass per-chunk context metadata the downstream
-                # model needs. Reset each chunk to match main's behavior
-                # and avoid accumulating stale payload data.
-                request.additional_information = {}
-                if "left_context_size" in meta:
-                    request.additional_information["meta"] = {
-                        "left_context_size": meta["left_context_size"],
-                    }
+                # Preserve previously attached request metadata and overlay
+                # the new chunk's fields. Mirrors main's behavior (nested
+                # schema: skip codes.audio which rides on prompt_token_ids,
+                # and meta.finished which is handled above).
+                prev_info = getattr(request, "additional_information", None)
+                info = dict(prev_info) if isinstance(prev_info, dict) else {}
+                for key, value in payload_data.items():
+                    if key == "codes":
+                        continue
+                    if key == "meta" and isinstance(value, dict):
+                        existing_meta = info.get("meta") if isinstance(info.get("meta"), dict) else {}
+                        existing_meta = dict(existing_meta)
+                        for sk, sv in value.items():
+                            if sk == "finished":
+                                continue
+                            existing_meta[sk] = sv
+                        info["meta"] = existing_meta
+                        continue
+                    info[key] = value
+                request.additional_information = info
                 request.num_computed_tokens = 0
 
                 # Empty chunk with more data expected: keep polling.

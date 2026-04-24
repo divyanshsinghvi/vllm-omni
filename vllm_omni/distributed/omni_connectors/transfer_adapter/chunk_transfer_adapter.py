@@ -2,7 +2,6 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import importlib
-import time
 from collections import defaultdict, deque
 from typing import Any
 
@@ -126,18 +125,6 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         with self._save_cond:
             self._save_cond.notify()
 
-    def _recv_accum(self, req_id: str) -> dict[str, float]:
-        if not hasattr(self, "_recv_timings"):
-            self._recv_timings: dict[str, dict[str, float]] = {}
-        return self._recv_timings.setdefault(req_id, {"count": 0.0, "get_ms": 0.0, "update_ms": 0.0})
-
-    def _send_accum(self, req_id: str) -> dict[str, float]:
-        if not hasattr(self, "_send_timings"):
-            self._send_timings: dict[str, dict[str, float]] = {}
-        return self._send_timings.setdefault(
-            req_id, {"count": 0.0, "unflatten_ms": 0.0, "custom_ms": 0.0, "put_ms": 0.0}
-        )
-
     def _poll_single_request(self, request: Request):
         stage_id = self.connector.stage_id
         target_stage_id = stage_id - 1
@@ -148,13 +135,11 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
 
         # Use timeout=0 for non-blocking poll
         try:
-            _t_get = time.perf_counter()
             result = self.connector.get(
                 str(target_stage_id),
                 str(stage_id),
                 connector_get_key,
             )
-            _dt_get_ms = (time.perf_counter() - _t_get) * 1000.0
         except Exception as e:
             logger.error(f"SharedMemoryConnector get failed for req {connector_get_key}: {e}")
             return False
@@ -168,11 +153,8 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             self.get_req_chunk[req_id] += 1
 
             meta = payload_data.get("meta", {})
-            _dt_update_ms = 0.0
             if self.model_mode == "ar":
-                _t_update = time.perf_counter()
                 merged_payload = self._update_request_payload(external_req_id, payload_data)
-                _dt_update_ms = (time.perf_counter() - _t_update) * 1000.0
                 request.additional_information = merged_payload
                 if meta.get("finished"):
                     self.finished_requests.add(req_id)
@@ -199,21 +181,6 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             # Mark as finished for consumption
             self._finished_load_reqs.add(req_id)
             logger.debug(f"[Stage-{stage_id}] Received one chunk for key {connector_get_key}")
-
-            accum = self._recv_accum(external_req_id)
-            accum["count"] += 1
-            accum["get_ms"] += _dt_get_ms
-            accum["update_ms"] += _dt_update_ms
-            if meta.get("finished"):
-                logger.info(
-                    "[chunk-time-summary] stage=%s side=recv req=%s chunks=%d get_ms_total=%.3f update_ms_total=%.3f",
-                    stage_id,
-                    external_req_id,
-                    int(accum["count"]),
-                    accum["get_ms"],
-                    accum["update_ms"],
-                )
-                self._recv_timings.pop(external_req_id, None)
             return True
 
         return False
@@ -248,9 +215,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
 
     def _send_single_request(self, task: dict):
         raw_po = task["pooling_output"]
-        _t_unflatten = time.perf_counter()
         pooling_output = unflatten_payload(raw_po) if isinstance(raw_po, dict) else raw_po
-        _dt_unflatten_ms = (time.perf_counter() - _t_unflatten) * 1000.0
         request = task["request"]
         is_finished = task["is_finished"]
         stage_id = self.connector.stage_id
@@ -260,17 +225,14 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         connector_put_key = f"{external_req_id}_{stage_id}_{chunk_id}"
         # Process payload in save_loop thread
         payload_data = None
-        _dt_custom_ms = 0.0
         if self.custom_process_next_stage_input_func:
             try:
-                _t_custom = time.perf_counter()
                 payload_data = self.custom_process_next_stage_input_func(
                     transfer_manager=self,
                     pooling_output=pooling_output,
                     request=request,
                     is_finished=is_finished,
                 )
-                _dt_custom_ms = (time.perf_counter() - _t_custom) * 1000.0
 
             except Exception as e:
                 logger.error(f"Failed to use custom_process_input_func for payload extraction: {e}")
@@ -278,20 +240,12 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         if not payload_data:
             return
 
-        _t_put = time.perf_counter()
         success, size, metadata = self.connector.put(
             from_stage=str(stage_id),
             to_stage=str(next_stage_id),
             put_key=connector_put_key,
             data=payload_data,
         )
-        _dt_put_ms = (time.perf_counter() - _t_put) * 1000.0
-
-        accum = self._send_accum(external_req_id)
-        accum["count"] += 1
-        accum["unflatten_ms"] += _dt_unflatten_ms
-        accum["custom_ms"] += _dt_custom_ms
-        accum["put_ms"] += _dt_put_ms
 
         if success:
             self.put_req_chunk[external_req_id] += 1
@@ -306,18 +260,6 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             # Reclaim per-request async state only after the terminal payload
             # has been sent successfully. This avoids cleanup->save races.
             if is_payload_finished:
-                if external_req_id in getattr(self, "_send_timings", {}):
-                    summary = self._send_timings.pop(external_req_id)
-                    logger.info(
-                        "[chunk-time-summary] stage=%s side=send req=%s chunks=%d "
-                        "unflatten_ms_total=%.3f custom_ms_total=%.3f put_ms_total=%.3f",
-                        stage_id,
-                        external_req_id,
-                        int(summary["count"]),
-                        summary["unflatten_ms"],
-                        summary["custom_ms"],
-                        summary["put_ms"],
-                    )
                 self.cleanup(request.request_id, external_req_id)
 
         if is_finished:

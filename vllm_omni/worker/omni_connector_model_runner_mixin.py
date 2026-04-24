@@ -378,7 +378,7 @@ class OmniConnectorModelRunnerMixin:
         if isinstance(meta, dict) and "left_context_size" in meta:
             extracted["left_context_size"] = meta["left_context_size"]
         elif "left_context_size" in payload:
-            logger.warning("legacy flat 'left_context_size' key in payload; expected 'meta.left_context_size'")
+            logger.warning_once("legacy flat 'left_context_size' key in payload; expected 'meta.left_context_size'")
         return extracted
 
     _NON_CONSUMABLE_PAYLOAD_KEYS = {
@@ -406,7 +406,7 @@ class OmniConnectorModelRunnerMixin:
         if not isinstance(payload, dict):
             return False
         if "finished" in payload:
-            logger.warning("legacy flat 'finished' key in payload; expected 'meta.finished'")
+            logger.warning_once("legacy flat 'finished' key in payload; expected 'meta.finished'")
         meta = payload.get("meta")
         if not isinstance(meta, dict) or "finished" not in meta:
             return False
@@ -420,7 +420,7 @@ class OmniConnectorModelRunnerMixin:
         if not isinstance(payload, dict):
             return None
         if "code_predictor_codes" in payload:
-            logger.warning("legacy flat 'code_predictor_codes' key in payload; expected 'codes.audio'")
+            logger.warning_once("legacy flat 'code_predictor_codes' key in payload; expected 'codes.audio'")
         codes = payload.get("codes")
         if isinstance(codes, dict):
             return codes.get("audio")

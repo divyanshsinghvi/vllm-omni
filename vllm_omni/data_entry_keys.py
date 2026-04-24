@@ -100,10 +100,50 @@ class OmniPayload(TypedDict, total=False):
     generated_len: int
     model_outputs: list[torch.Tensor]
     mtp_inputs: tuple[torch.Tensor, torch.Tensor]
+    speaker: Any
+    language: Any
+    request_id: str
 
 
 # ── Keys whose values are nested dicts (TypedDict sub-categories) ──
 _NESTED_KEYS = frozenset({"hidden_states", "embed", "ids", "codes", "meta"})
+
+# Sub-TypedDict for each nested category, used by runtime validation.
+_NESTED_SCHEMAS: dict[str, type] = {
+    "hidden_states": HiddenStates,
+    "embed": Embeddings,
+    "ids": Ids,
+    "codes": Codes,
+    "meta": OmniPayloadMeta,
+}
+
+_ROOT_KEYS: frozenset[str] = frozenset(OmniPayload.__annotations__.keys())
+
+
+def assert_payload(payload: dict[str, Any], *, context: str = "payload") -> None:
+    """Validate ``payload`` matches the ``OmniPayload`` nested schema.
+
+    TypedDict is a static-only contract in Python; this helper closes the
+    loop at runtime by rejecting:
+      * non-dict payloads
+      * top-level keys not declared on ``OmniPayload``
+      * nested-category values that aren't dicts
+      * sub-keys not declared on the matching nested TypedDict
+
+    Call at producer/consumer boundaries when a schema violation should
+    crash the pipeline instead of silently degrading audio quality.
+    """
+    assert isinstance(payload, dict), f"{context}: expected dict, got {type(payload).__name__}"
+    extra_top = set(payload) - _ROOT_KEYS
+    assert not extra_top, f"{context}: unknown top-level keys {sorted(extra_top)!r}"
+    for nested_key, schema in _NESTED_SCHEMAS.items():
+        if nested_key not in payload:
+            continue
+        sub = payload[nested_key]
+        assert isinstance(sub, dict), f"{context}: payload[{nested_key!r}] must be dict, got {type(sub).__name__}"
+        known_sub = frozenset(schema.__annotations__.keys())
+        extra_sub = set(sub) - known_sub
+        assert not extra_sub, f"{context}: payload[{nested_key!r}] unknown sub-keys {sorted(extra_sub)!r}"
 
 
 def flatten_payload(payload: dict[str, Any]) -> dict[str, Any]:

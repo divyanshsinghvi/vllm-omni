@@ -219,20 +219,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         return False
 
     def _update_request_payload(self, req_id: str, payload_data: dict[str, Any]) -> dict[str, Any]:
-        """Merge *payload_data* into the stored payload for *req_id*.
-
-        The internal ``self.request_payload`` accumulator preserves keys
-        from earlier chunks (e.g. chunk-0 prefill embeds) so any downstream
-        code querying full request state sees the complete payload.
-
-        Returns the per-chunk delta (``payload_data``), not the merged
-        accumulator — the delta is what gets attached to
-        ``request.additional_information`` and broadcast to worker
-        processes each step. The model runner's ``_update_intermediate_buffer``
-        accumulates deltas into ``model_intermediate_buffer``, so the worker
-        still reconstructs the full state over time without paying to
-        re-serialize the whole 17 MB prefill payload every step.
-        """
+        """Update the stored payload for *req_id* with the latest chunk."""
         if req_id not in self.request_payload:
             self.request_payload[req_id] = payload_data
             return payload_data
@@ -240,31 +227,23 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         raw_ok = payload_data.get("meta", {}).pop("override_keys", [])
         override_keys = {tuple(k) if isinstance(k, list) else k for k in raw_ok}
 
-        merged: dict[str, Any] = dict(origin)
-
         for type_key, new_val in payload_data.items():
             if not isinstance(new_val, dict):
-                merged[type_key] = new_val
                 continue
-            origin_sub = merged.get(type_key)
+            origin_sub = origin.get(type_key)
             if not isinstance(origin_sub, dict):
-                merged[type_key] = new_val
                 continue
-            merged_sub = dict(origin_sub)
             for qual, value in new_val.items():
                 if type_key == "meta" and qual == "finished":
-                    merged_sub[qual] = value
-                elif (type_key, qual) in override_keys:
-                    merged_sub[qual] = value
-                elif isinstance(value, torch.Tensor) and qual in origin_sub:
-                    merged_sub[qual] = torch.cat([origin_sub[qual], value], dim=0)
+                    continue
+                if (type_key, qual) in override_keys:
+                    continue
+                if isinstance(value, torch.Tensor) and qual in origin_sub:
+                    new_val[qual] = torch.cat([origin_sub[qual], value], dim=0)
                 elif isinstance(value, list) and qual in origin_sub:
-                    merged_sub[qual] = origin_sub[qual] + value
-                else:
-                    merged_sub[qual] = value
-            merged[type_key] = merged_sub
+                    new_val[qual] = origin_sub[qual] + value
 
-        self.request_payload[req_id] = merged
+        self.request_payload[req_id] = payload_data
         return payload_data
 
     def _send_single_request(self, task: dict):

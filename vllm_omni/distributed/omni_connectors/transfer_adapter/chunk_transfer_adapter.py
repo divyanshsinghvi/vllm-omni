@@ -219,11 +219,19 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         return False
 
     def _update_request_payload(self, req_id: str, payload_data: dict[str, Any]) -> dict[str, Any]:
-        """Deep-merge *payload_data* into the stored payload for *req_id*.
+        """Merge *payload_data* into the stored payload for *req_id*.
 
-        Keys present in the stored payload but absent from *payload_data*
-        are preserved (important for multi-chunk flows where only the first
-        chunk carries the full set of fields).
+        The internal ``self.request_payload`` accumulator preserves keys
+        from earlier chunks (e.g. chunk-0 prefill embeds) so any downstream
+        code querying full request state sees the complete payload.
+
+        Returns the per-chunk delta (``payload_data``), not the merged
+        accumulator — the delta is what gets attached to
+        ``request.additional_information`` and broadcast to worker
+        processes each step. The model runner's ``_update_intermediate_buffer``
+        accumulates deltas into ``model_intermediate_buffer``, so the worker
+        still reconstructs the full state over time without paying to
+        re-serialize the whole 17 MB prefill payload every step.
         """
         if req_id not in self.request_payload:
             self.request_payload[req_id] = payload_data
@@ -257,7 +265,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             merged[type_key] = merged_sub
 
         self.request_payload[req_id] = merged
-        return merged
+        return payload_data
 
     def _send_single_request(self, task: dict):
         raw_po = task["pooling_output"]

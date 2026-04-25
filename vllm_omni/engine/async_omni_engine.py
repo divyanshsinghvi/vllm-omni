@@ -196,7 +196,7 @@ def _apply_omni_final_stage_metadata(
     merged: dict[str, Any] = {}
     if isinstance(request, OmniEngineCoreRequest) and request.additional_information is not None:
         merged = deserialize_additional_information(request.additional_information)
-    merged["omni_final_stage_id"] = final_stage_id
+    merged.setdefault("meta", {})["omni_final_stage_id"] = final_stage_id
     payload = serialize_additional_information(merged)
     return OmniEngineCoreRequest(
         request_id=request.request_id,

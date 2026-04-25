@@ -8,7 +8,7 @@ from typing import Any
 import torch
 from vllm.v1.request import Request, RequestStatus
 
-from vllm_omni.data_entry_keys import OmniPayload
+from vllm_omni.data_entry_keys import OmniPayload, OmniPayloadStruct, to_dict, to_struct
 
 from ..factory import OmniConnectorFactory
 from ..utils.config import ConnectorSpec
@@ -155,7 +155,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             meta = payload_data.get("meta", {})
             if self.model_mode == "ar":
                 merged_payload = self._update_request_payload(external_req_id, payload_data)
-                request.additional_information = merged_payload
+                request.additional_information = to_struct(merged_payload)
                 if meta.get("finished"):
                     self.finished_requests.add(req_id)
             else:
@@ -169,7 +169,12 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
                     new_ids = []
                 request.prompt_token_ids = new_ids
                 prev_info = getattr(request, "additional_information", None)
-                info = dict(prev_info) if isinstance(prev_info, dict) else {}
+                if isinstance(prev_info, OmniPayloadStruct):
+                    info = to_dict(prev_info)
+                elif isinstance(prev_info, dict):
+                    info = dict(prev_info)
+                else:
+                    info = {}
                 for key, value in payload_data.items():
                     if key == "codes":
                         continue
@@ -183,7 +188,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
                         info[key] = merged_sub
                         continue
                     info[key] = value
-                request.additional_information = info
+                request.additional_information = to_struct(info)
                 request.num_computed_tokens = 0
 
                 # Empty chunk with more data expected: keep polling.

@@ -150,6 +150,7 @@ class MetaStruct(_StructBase):
     codec_chunk_frames: int | None = None
     codec_left_context_frames: int | None = None
     code_flat_numel: int | None = None
+    omni_final_stage_id: int | None = None
 
 
 class OmniPayloadStruct(_StructBase):
@@ -166,6 +167,8 @@ class OmniPayloadStruct(_StructBase):
     speaker: Any = None
     language: Any = None
     request_id: str | None = None
+    past_key_values: list[int] | None = None
+    kv_metadata: dict[str, Any] | None = None
 
 
 _NESTED_STRUCTS: dict[str, type[_StructBase]] = {

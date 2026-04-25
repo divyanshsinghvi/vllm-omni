@@ -363,3 +363,56 @@ class TestValidatePayload:
 
         with pytest.raises(msgspec.ValidationError, match="my_call_site"):
             validate_payload({"bad": 1}, context="my_call_site")
+
+
+class TestNativeMsgspecEncoding:
+    """Phase 6 scaffolding: native msgspec encode/decode for OmniPayloadStruct."""
+
+    def test_encode_decode_round_trip_tensor(self):
+        from vllm_omni.data_entry_keys import decode_payload, encode_payload
+
+        original = OmniPayloadStruct(
+            codes=CodesStruct(audio=torch.tensor([1, 2, 3, 4], dtype=torch.long)),
+            meta=MetaStruct(left_context_size=5, finished=torch.tensor(True)),
+        )
+        wire = encode_payload(original)
+        assert isinstance(wire, bytes)
+        restored = decode_payload(wire)
+        assert isinstance(restored, OmniPayloadStruct)
+        assert torch.equal(restored.codes.audio, original.codes.audio)
+        assert restored.meta.left_context_size == 5
+        assert bool(restored.meta.finished.item()) is True
+
+    def test_encode_decode_round_trip_dtypes(self):
+        from vllm_omni.data_entry_keys import decode_payload, encode_payload
+
+        for dtype in (torch.float32, torch.float16, torch.bfloat16, torch.int64, torch.bool):
+            original = OmniPayloadStruct(codes=CodesStruct(audio=torch.tensor([1, 0, 1], dtype=dtype)))
+            restored = decode_payload(encode_payload(original))
+            assert restored.codes.audio.dtype == dtype, f"dtype mismatch for {dtype}"
+
+    def test_encode_decode_preserves_shape(self):
+        from vllm_omni.data_entry_keys import decode_payload, encode_payload
+
+        t = torch.randn(3, 4, 5)
+        original = OmniPayloadStruct(hidden_states=HiddenStatesStruct(output=t))
+        restored = decode_payload(encode_payload(original))
+        assert restored.hidden_states.output.shape == (3, 4, 5)
+        assert torch.allclose(restored.hidden_states.output, t)
+
+    def test_encode_decode_speaker_language(self):
+        from vllm_omni.data_entry_keys import decode_payload, encode_payload
+
+        original = OmniPayloadStruct(speaker="ethan", language="en")
+        restored = decode_payload(encode_payload(original))
+        assert restored.speaker == "ethan"
+        assert restored.language == "en"
+
+    def test_decode_rejects_unknown_field(self):
+        from vllm_omni.data_entry_keys import _OMNI_PAYLOAD_ENCODER, decode_payload
+
+        # Manually craft msgpack with unknown top-level field
+        bad_dict = {"code_predictor_codes": [1, 2, 3]}
+        wire = _OMNI_PAYLOAD_ENCODER.encode(bad_dict)
+        with pytest.raises(msgspec.ValidationError, match="unknown field"):
+            decode_payload(wire)

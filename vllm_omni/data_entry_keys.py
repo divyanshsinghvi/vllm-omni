@@ -210,11 +210,18 @@ _NESTED_STRUCTS: dict[str, type[_StructBase]] = {
 }
 
 
+_TENSOR_MARKER = "__tensor__"
+
+
 def _msgspec_dec_hook(typ: type, obj: Any) -> Any:
-    """Bridge non-msgspec types (``torch.Tensor``) when decoding into Structs."""
+    """Bridge non-msgspec types when decoding bytes/dicts into Structs."""
     if typ is torch.Tensor:
         if isinstance(obj, torch.Tensor):
             return obj
+        if isinstance(obj, dict) and obj.get(_TENSOR_MARKER):
+            arr = np.frombuffer(obj["data"], dtype=np.dtype(obj["dtype"]))
+            arr = arr.reshape(obj["shape"])
+            return torch.from_numpy(arr.copy())
         raise TypeError(f"cannot decode {type(obj).__name__} into torch.Tensor")
     raise NotImplementedError(f"no decoder for {typ}")
 
@@ -222,12 +229,26 @@ def _msgspec_dec_hook(typ: type, obj: Any) -> Any:
 def _msgspec_enc_hook(obj: Any) -> Any:
     if isinstance(obj, torch.Tensor):
         return {
-            "__tensor__": True,
+            _TENSOR_MARKER: True,
             "data": obj.detach().cpu().contiguous().numpy().tobytes(),
             "shape": list(obj.shape),
             "dtype": _dtype_to_name(obj.dtype),
         }
     raise NotImplementedError(f"no encoder for {type(obj).__name__}")
+
+
+_OMNI_PAYLOAD_ENCODER = msgspec.msgpack.Encoder(enc_hook=_msgspec_enc_hook)
+_OMNI_PAYLOAD_DECODER = msgspec.msgpack.Decoder(OmniPayloadStruct, dec_hook=_msgspec_dec_hook)
+
+
+def encode_payload(struct: OmniPayloadStruct) -> bytes:
+    """Encode ``OmniPayloadStruct`` to msgpack bytes for cross-process transport."""
+    return _OMNI_PAYLOAD_ENCODER.encode(struct)
+
+
+def decode_payload(data: bytes) -> OmniPayloadStruct:
+    """Decode msgpack bytes back to ``OmniPayloadStruct``, validating the schema."""
+    return _OMNI_PAYLOAD_DECODER.decode(data)
 
 
 def to_struct(payload: dict[str, Any]) -> OmniPayloadStruct:

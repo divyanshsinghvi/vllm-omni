@@ -932,7 +932,7 @@ class OmniGPUModelRunner(GPUModelRunner):
 
     # ------------------------------------------------------------------
     # Payload decoding helpers (torch.Tensor passthrough + legacy
-    # PromptEmbedsPayload / AdditionalInformationPayload support)
+    # PromptEmbedsPayload / OmniPayloadStruct support)
     # ------------------------------------------------------------------
 
     @staticmethod

@@ -4,7 +4,13 @@ import torch
 from vllm.inputs import TextPrompt
 from vllm.logger import init_logger
 
-from vllm_omni.data_entry_keys import OmniPayload
+from vllm_omni.data_entry_keys import (
+    CodesStruct,
+    MetaStruct,
+    OmniPayload,
+    OmniPayloadStruct,
+    to_dict,
+)
 from vllm_omni.inputs.data import OmniTokensPrompt
 from vllm_omni.model_executor.models.mimo_audio.config_mimo_audio import TALKER_CODEC_PAD_TOKEN_ID
 
@@ -56,7 +62,12 @@ def prepend_and_flatten_colmajor(x: torch.Tensor, pad_vec: torch.Tensor) -> torc
 
 def _make_finished_sentinel() -> dict[str, Any]:
     """Return a minimal payload with finished=True so Stage-1 can end the request."""
-    return {"codes": {"audio": []}, "meta": {"finished": torch.tensor(True, dtype=torch.bool)}}
+    return to_dict(
+        OmniPayloadStruct(
+            codes=CodesStruct(audio=torch.empty(0, dtype=torch.long)),
+            meta=MetaStruct(finished=torch.tensor(True, dtype=torch.bool)),
+        )
+    )
 
 
 def _flush_remaining_codes(
@@ -77,18 +88,20 @@ def _flush_remaining_codes(
 
     # Align with qwen3_omni talker2code2wav_async_chunk: decoder strip uses explicit frame count.
     left_ctx_frames = max(0, min(length - context_length, left_context_size))
-    flat_codes = torch.tensor(accumulated[-end_index:]).reshape(-1).tolist()
+    flat_codes = torch.tensor(accumulated[-end_index:]).reshape(-1)
 
-    return {
-        "codes": {"audio": flat_codes},
-        "meta": {
-            "left_context_size": left_ctx_frames,
-            "codec_chunk_frames": chunk_size,
-            "codec_left_context_frames": left_context_size,
-            "code_flat_numel": len(flat_codes),
-            "finished": torch.tensor(True, dtype=torch.bool),
-        },
-    }
+    return to_dict(
+        OmniPayloadStruct(
+            codes=CodesStruct(audio=flat_codes),
+            meta=MetaStruct(
+                left_context_size=left_ctx_frames,
+                codec_chunk_frames=chunk_size,
+                codec_left_context_frames=left_context_size,
+                code_flat_numel=int(flat_codes.numel()),
+                finished=torch.tensor(True, dtype=torch.bool),
+            ),
+        )
+    )
 
 
 def _is_codes_empty(codes: Any) -> bool:
@@ -168,18 +181,18 @@ def llm2code2wav_async_chunk(
     left_ctx_frames = max(0, min(length - context_length, left_context_size))
     flat_codes = torch.tensor(transfer_manager.code_prompt_token_ids[request_id][-end_index:]).reshape(-1).tolist()
 
-    return {
-        "codes": {
-            "audio": flat_codes,
-        },
-        "meta": {
-            "left_context_size": left_ctx_frames,
-            "codec_chunk_frames": chunk_size,
-            "codec_left_context_frames": left_context_size,
-            "code_flat_numel": len(flat_codes),
-            "finished": torch.tensor(is_finished, dtype=torch.bool),
-        },
-    }
+    return to_dict(
+        OmniPayloadStruct(
+            codes=CodesStruct(audio=torch.tensor(flat_codes)),
+            meta=MetaStruct(
+                left_context_size=left_ctx_frames,
+                codec_chunk_frames=chunk_size,
+                codec_left_context_frames=left_context_size,
+                code_flat_numel=len(flat_codes),
+                finished=torch.tensor(is_finished, dtype=torch.bool),
+            ),
+        )
+    )
 
 
 def llm2code2wav(

@@ -179,6 +179,9 @@ class MetaStruct(_StructBase):
     codec_streaming: bool | None = None
     ref_code_len: int | None = None
     talker_prefill_offset: int | None = None
+    codec_chunk_frames: int | None = None
+    codec_left_context_frames: int | None = None
+    code_flat_numel: int | None = None
 
 
 class OmniPayloadStruct(_StructBase):

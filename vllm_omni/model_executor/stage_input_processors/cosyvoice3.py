@@ -230,7 +230,6 @@ def talker2code2wav_async_chunk(
                 "finished": torch.tensor(finished, dtype=torch.bool),
                 "left_context_size": token_offset,
             },
-            "token_offset": token_offset,
             "req_id": [request_id],
             "stream_finished": torch.tensor(finished, dtype=torch.bool),
         }

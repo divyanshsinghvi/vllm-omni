@@ -716,11 +716,7 @@ class CosyVoice3Model(
                     if (
                         req_ids.numel() > 0
                         and info
-                        and (
-                            "token_offset" in info
-                            or "left_context_size" in info.get("meta", {})
-                            or "generated_len" in info
-                        )
+                        and ("left_context_size" in info.get("meta", {}) or "generated_len" in info)
                     ):
                         info_keys = ",".join(sorted(info.keys())) if info else ""
                         logger.warning_once(
@@ -749,16 +745,9 @@ class CosyVoice3Model(
                 # runner, so only explicit chunk-routing fields should switch
                 # code2wav into the streaming path.
                 meta = info.get("meta", {}) if info else {}
-                uses_streaming_decode = bool(info) and (
-                    "stream_finished" in info or "token_offset" in info or "left_context_size" in meta
-                )
+                uses_streaming_decode = bool(info) and ("stream_finished" in info or "left_context_size" in meta)
                 if uses_streaming_decode:
-                    if info and "token_offset" in info:
-                        token_offset = max(0, info["token_offset"])
-                    elif "left_context_size" in meta:
-                        token_offset = max(0, meta["left_context_size"])
-                    else:
-                        token_offset = 0
+                    token_offset = max(0, meta.get("left_context_size", 0))
 
                     cache_state = None
                     if req_id is not None and hasattr(self, "_stream_vocoder_cache_by_req"):

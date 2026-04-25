@@ -333,3 +333,33 @@ class TestOmniPayloadStruct:
         assert isinstance(s.meta, MetaStruct)
         assert s.ids.all == [1, 2]
         assert s.meta.num_processed_tokens == 7
+
+
+class TestValidatePayload:
+    def test_raises_on_unknown_top_level(self):
+        from vllm_omni.data_entry_keys import validate_payload
+
+        with pytest.raises(msgspec.ValidationError, match="unknown field"):
+            validate_payload({"code_predictor_codes": torch.zeros(3, 8)}, context="test_boundary")
+
+    def test_raises_on_unknown_sub_key(self):
+        from vllm_omni.data_entry_keys import validate_payload
+
+        with pytest.raises(msgspec.ValidationError, match="unknown field"):
+            validate_payload({"meta": {"finisheed": True}})
+
+    def test_none_is_ok(self):
+        from vllm_omni.data_entry_keys import validate_payload
+
+        validate_payload(None)  # should not raise
+
+    def test_valid_payload_passes(self):
+        from vllm_omni.data_entry_keys import validate_payload
+
+        validate_payload({"meta": {"left_context_size": 5}})
+
+    def test_context_in_error_message(self):
+        from vllm_omni.data_entry_keys import validate_payload
+
+        with pytest.raises(msgspec.ValidationError, match="my_call_site"):
+            validate_payload({"bad": 1}, context="my_call_site")

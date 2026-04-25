@@ -236,6 +236,21 @@ def to_struct(payload: dict[str, Any]) -> OmniPayloadStruct:
     return msgspec.convert(payload, OmniPayloadStruct, dec_hook=_msgspec_dec_hook)
 
 
+def validate_payload(payload: dict[str, Any] | None, *, context: str = "payload") -> None:
+    """Validate a payload matches the ``OmniPayload`` schema, raising on drift.
+
+    Wraps :func:`to_struct` and re-raises ``msgspec.ValidationError`` with
+    the call-site ``context`` prepended.  ``None`` is allowed (treated as
+    "no payload to check").
+    """
+    if payload is None:
+        return
+    try:
+        to_struct(payload)
+    except msgspec.ValidationError as exc:
+        raise msgspec.ValidationError(f"{context}: {exc}") from exc
+
+
 def to_dict(struct: OmniPayloadStruct) -> dict[str, Any]:
     """Convert ``OmniPayloadStruct`` back to a plain dict, dropping unset fields.
 

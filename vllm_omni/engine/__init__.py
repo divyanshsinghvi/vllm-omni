@@ -5,7 +5,6 @@ Engine components for vLLM-Omni.
 from typing import Any
 
 import msgspec
-import torch
 from vllm.v1.engine import (
     EngineCoreOutput,
     EngineCoreOutputs,
@@ -78,7 +77,7 @@ class OmniEngineCoreRequest(EngineCoreRequest):
 
 
 class OmniEngineCoreOutput(EngineCoreOutput):
-    pooling_output: dict[str, torch.Tensor] | None = None
+    pooling_output: dict[str, Any] | None = None
     # Finished flag for streaming input segment
     is_segment_finished: bool | None = False
     # Streaming update prompt length

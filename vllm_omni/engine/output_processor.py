@@ -16,7 +16,6 @@ from vllm.v1.engine.output_processor import (
 from vllm.v1.engine.parallel_sampling import ParentRequest
 from vllm.v1.metrics.stats import IterationStats
 
-from vllm_omni.data_entry_keys import unflatten_payload
 from vllm_omni.outputs import OmniRequestOutput
 
 logger = init_logger(__name__)
@@ -134,13 +133,6 @@ class OmniRequestState(RequestState):
                                 v[sk] = sv[-1]
         except Exception:
             logger.exception("Error consolidating multimodal tensors")
-
-        # Restore nested structure from flat dotted keys now that all tensor
-        # lists have been concatenated into single tensors.
-        try:
-            self.mm_accumulated = unflatten_payload(self.mm_accumulated)
-        except Exception:
-            logger.exception("Error unflattening consolidated multimodal tensors")
 
     # Override: do not route to pooling-only path; always create completion
     # outputs, and attach pooling_result into the CompletionOutput.

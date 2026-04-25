@@ -1,23 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Structured payload types for inter-stage communication.
 
-Adding a new model?
-~~~~~~~~~~~~~~~~~~~
-Every key you put into the inter-stage payload (``additional_information``,
-``multimodal_output``, ``pooling_output``) **must** use the nested
-``OmniPayload`` TypedDict structure.  For each category, every known
-qualifier is an explicit field so misspellings are caught statically.
-
-Categories
+Categories under ``OmniPayload``:
     hidden_states  – intermediate / output hidden-state tensors
     embed          – embedding tensors (prefill, decode, special tokens)
     ids            – token-ID sequences
     codes          – codec / audio code tensors
     meta           – scalar metadata, control flags, shapes
-
-This module provides:
-- Structured ``TypedDict`` types for static type checking (``OmniPayload``)
-- ``serialize_payload`` / ``deserialize_payload`` for transport across
-  process boundaries via ``AdditionalInformationPayload``
 """
 
 from __future__ import annotations
@@ -30,12 +20,6 @@ import torch
 
 if TYPE_CHECKING:
     from vllm_omni.engine import AdditionalInformationEntry, AdditionalInformationPayload
-
-# ── Structured payload types ──
-# These are TypedDicts (plain dicts at runtime, zero overhead) that give
-# static type checking and IDE autocomplete for inter-stage payloads.
-# Every field is optional (total=False) because each stage only populates
-# the subset it needs.
 
 
 class HiddenStates(TypedDict, total=False):
@@ -106,26 +90,11 @@ class OmniPayload(TypedDict, total=False):
     request_id: str
 
 
-# ── msgspec.Struct schema (runtime-validated mirror of the TypedDicts above) ──
-#
-# The TypedDicts give static type checking but are plain dicts at runtime, so
-# producer/consumer key mismatches degrade silently (the regularize_data_entries
-# refactor surfaced ~8 such bugs).  These Struct types add runtime type
-# checking via ``msgspec.convert``, attribute access (``p.meta.finished``
-# instead of ``p["meta"]["finished"]``), and unify the serialization path
-# with the existing msgspec encoders.
-#
-# Dict and Struct forms coexist during migration; converters
-# (:func:`to_struct`, :func:`to_dict`) bridge the two.
+# ── msgspec.Struct mirror of the TypedDicts (runtime-validated) ──
 
 
 class _StructBase(msgspec.Struct, omit_defaults=True, kw_only=True, forbid_unknown_fields=True):
-    """Common base for nested payload structs.
-
-    - ``omit_defaults``: skip ``None`` fields when serializing.
-    - ``kw_only``: mirror TypedDict construction style.
-    - ``forbid_unknown_fields``: reject typos and legacy flat keys at decode time.
-    """
+    pass
 
 
 class HiddenStatesStruct(_StructBase):
@@ -187,6 +156,7 @@ class MetaStruct(_StructBase):
 
 
 class OmniPayloadStruct(_StructBase):
+    hidden: torch.Tensor | None = None
     hidden_states: HiddenStatesStruct | None = None
     embed: EmbeddingsStruct | None = None
     ids: IdsStruct | None = None
@@ -278,10 +248,7 @@ def validate_payload(payload: dict[str, Any] | None, *, context: str = "payload"
 
 
 def to_dict(struct: OmniPayloadStruct) -> dict[str, Any]:
-    """Convert ``OmniPayloadStruct`` back to a plain dict, dropping unset fields.
-
-    Used during migration when downstream code still expects dicts.
-    """
+    """Convert ``OmniPayloadStruct`` to a plain dict, dropping ``None`` fields."""
     out: dict[str, Any] = {}
     for field in OmniPayloadStruct.__struct_fields__:
         value = getattr(struct, field)

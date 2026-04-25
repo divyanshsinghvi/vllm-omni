@@ -13,6 +13,9 @@ from vllm.platforms import current_platform
 
 from vllm_omni.data_entry_keys import (
     CodesStruct,
+    EmbeddingsStruct,
+    HiddenStatesStruct,
+    IdsStruct,
     MetaStruct,
     OmniPayload,
     OmniPayloadStruct,
@@ -309,76 +312,59 @@ def thinker2talker_async_chunk(
     thinker_hs = pooling_output.get("hidden_states", {})
     thinker_layers = thinker_hs.get("layers", {})
     thinker_embed = pooling_output.get("embed", {})
+    speaker = extract_speaker_from_request(request)
+    language = extract_language_from_request(request)
 
     if chunk_id == 0:
-        all_token_ids = request.all_token_ids  # prefill + decode
-        prompt_token_ids = request.prompt_token_ids
-        # Convert ConstantList to regular list for OmniSerializer serialization
-        all_token_ids = _ensure_list(all_token_ids)
-        prompt_token_ids = _ensure_list(prompt_token_ids)
-        payload: OmniPayload = {
-            "embed": {
-                "prefill": thinker_layers[int(_EMBED_LAYER_KEY)].detach().cpu(),
-                # Provide thinker-side TTS token embeddings for talker projection
-                "tts_bos": thinker_embed["tts_bos"].detach().cpu(),
-                "tts_eos": thinker_embed["tts_eos"].detach().cpu(),
-                "tts_pad": thinker_embed["tts_pad"].detach().cpu(),
-            },
-            "hidden_states": {"output": thinker_layers[int(_HIDDEN_LAYER_KEY)].detach().cpu()},
-            "ids": {"all": all_token_ids, "prompt": prompt_token_ids},
-            "meta": {"finished": torch.tensor(is_finished, dtype=torch.bool)},
-        }
-        talker_additional_info = payload
-        speaker = extract_speaker_from_request(request)
-        if speaker is not None:
-            talker_additional_info["speaker"] = speaker
-        language = extract_language_from_request(request)
-        if language is not None:
-            talker_additional_info["language"] = language
+        all_token_ids = _ensure_list(request.all_token_ids)
+        prompt_token_ids = _ensure_list(request.prompt_token_ids)
+        payload = OmniPayloadStruct(
+            embed=EmbeddingsStruct(
+                prefill=thinker_layers[int(_EMBED_LAYER_KEY)].detach().cpu(),
+                tts_bos=thinker_embed["tts_bos"].detach().cpu(),
+                tts_eos=thinker_embed["tts_eos"].detach().cpu(),
+                tts_pad=thinker_embed["tts_pad"].detach().cpu(),
+            ),
+            hidden_states=HiddenStatesStruct(output=thinker_layers[int(_HIDDEN_LAYER_KEY)].detach().cpu()),
+            ids=IdsStruct(all=all_token_ids, prompt=prompt_token_ids),
+            meta=MetaStruct(finished=torch.tensor(is_finished, dtype=torch.bool)),
+            speaker=speaker,
+            language=language,
+        )
         if transfer_manager.request_payload.get(request_id) is None:
             if not is_finished:
-                transfer_manager.request_payload[request_id] = talker_additional_info
+                transfer_manager.request_payload[request_id] = to_dict(payload)
                 return None
         else:
             save_payload = transfer_manager.request_payload.pop(request_id)
-            talker_additional_info["embed"]["prefill"] = torch.cat(
-                (
-                    save_payload.get("embed", {}).get("prefill"),
-                    talker_additional_info.get("embed", {}).get("prefill"),
-                ),
-                dim=0,
+            payload.embed.prefill = torch.cat(
+                (save_payload.get("embed", {}).get("prefill"), payload.embed.prefill), dim=0
             )
-            talker_additional_info["hidden_states"]["output"] = torch.cat(
-                (
-                    save_payload.get("hidden_states", {}).get("output"),
-                    talker_additional_info.get("hidden_states", {}).get("output"),
-                ),
-                dim=0,
+            payload.hidden_states.output = torch.cat(
+                (save_payload.get("hidden_states", {}).get("output"), payload.hidden_states.output), dim=0
             )
     else:
-        output_token_ids = request.output_token_ids
-        # Convert ConstantList to regular list for OmniSerializer serialization
-        output_token_ids = _ensure_list(output_token_ids)
-
-        talker_additional_info: OmniPayload = {
-            "meta": {"finished": torch.tensor(is_finished, dtype=torch.bool)},
-        }
-        speaker = extract_speaker_from_request(request)
-        if speaker is not None:
-            talker_additional_info["speaker"] = speaker
-        language = extract_language_from_request(request)
-        if language is not None:
-            talker_additional_info["language"] = language
-
+        output_token_ids = _ensure_list(request.output_token_ids)
+        meta = MetaStruct(finished=torch.tensor(is_finished, dtype=torch.bool))
         if output_token_ids:
-            talker_additional_info["meta"]["override_keys"] = [("embed", "decode"), ("ids", "output")]
-            talker_additional_info["embed"] = {"decode": thinker_layers[int(_EMBED_LAYER_KEY)].detach().cpu()}
-            talker_additional_info["ids"] = {"output": output_token_ids}
+            meta.override_keys = [("embed", "decode"), ("ids", "output")]
+            payload = OmniPayloadStruct(
+                meta=meta,
+                embed=EmbeddingsStruct(decode=thinker_layers[int(_EMBED_LAYER_KEY)].detach().cpu()),
+                ids=IdsStruct(output=output_token_ids),
+                speaker=speaker,
+                language=language,
+            )
         else:
             # When prefilling a chunked thinker, thinker_hidden_states needs to be updated.
-            talker_additional_info["embed"] = {"prefill": thinker_layers[0].detach().cpu()}
-            talker_additional_info["hidden_states"] = {"output": thinker_layers[24].detach().cpu()}
-    return talker_additional_info
+            payload = OmniPayloadStruct(
+                meta=meta,
+                embed=EmbeddingsStruct(prefill=thinker_layers[0].detach().cpu()),
+                hidden_states=HiddenStatesStruct(output=thinker_layers[24].detach().cpu()),
+                speaker=speaker,
+                language=language,
+            )
+    return to_dict(payload)
 
 
 def thinker2talker(

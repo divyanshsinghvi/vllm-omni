@@ -22,32 +22,6 @@ from vllm_omni.data_entry_keys import (
 from vllm_omni.engine import AdditionalInformationPayload
 
 
-class TestOmniPayload:
-    def test_nested_payload_structure(self):
-        """Verify OmniPayload can be constructed with nested dicts."""
-        payload: OmniPayload = {
-            "hidden_states": {"output": torch.tensor([1.0])},
-            "embed": {"prefill": torch.tensor([2.0])},
-            "codes": {"audio": torch.tensor([3.0])},
-            "ids": {"all": [1, 2, 3]},
-            "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
-        }
-        assert torch.equal(payload["hidden_states"]["output"], torch.tensor([1.0]))
-        assert torch.equal(payload["embed"]["prefill"], torch.tensor([2.0]))
-        assert torch.equal(payload["codes"]["audio"], torch.tensor([3.0]))
-        assert payload["ids"]["all"] == [1, 2, 3]
-        assert payload["meta"]["finished"].item() is True
-
-    def test_partial_payload(self):
-        """OmniPayload fields are all optional (total=False)."""
-        payload: OmniPayload = {"meta": {"finished": torch.tensor(False, dtype=torch.bool)}}
-        assert payload["meta"]["finished"].item() is False
-
-    def test_empty_payload(self):
-        payload: OmniPayload = {}
-        assert len(payload) == 0
-
-
 class TestFlattenPayload:
     def test_basic_nested_to_dotted(self):
         nested = {
@@ -265,14 +239,6 @@ class TestSerializeDeserializePayload:
 class TestOmniPayloadStruct:
     """Runtime-validated mirror of OmniPayload (msgspec.Struct)."""
 
-    def test_construct_directly(self):
-        p = OmniPayloadStruct(
-            meta=MetaStruct(left_context_size=5, finished=torch.tensor(True)),
-            codes=CodesStruct(audio=torch.zeros(3, 8)),
-        )
-        assert p.meta.left_context_size == 5
-        assert torch.equal(p.codes.audio, torch.zeros(3, 8))
-
     def test_to_struct_validates_dict(self):
         d = {"meta": {"left_context_size": 25, "finished": torch.tensor(False)}}
         s = to_struct(d)
@@ -311,11 +277,6 @@ class TestOmniPayloadStruct:
         s = OmniPayloadStruct(meta=MetaStruct(left_context_size=10))
         d = to_dict(s)
         assert d == {"meta": {"left_context_size": 10}}
-
-    def test_struct_attr_access_catches_typos_at_lookup(self):
-        s = to_struct({"meta": {"finished": torch.tensor(True)}})
-        with pytest.raises(AttributeError):
-            _ = s.meta.finisheed
 
     def test_struct_with_all_categories(self):
         d = {

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, TypedDict
 
+import msgspec
 import numpy as np
 import torch
 
@@ -103,6 +104,159 @@ class OmniPayload(TypedDict, total=False):
     speaker: Any
     language: Any
     request_id: str
+
+
+# ── msgspec.Struct schema (runtime-validated mirror of the TypedDicts above) ──
+#
+# The TypedDicts give static type checking but are plain dicts at runtime, so
+# producer/consumer key mismatches degrade silently (the regularize_data_entries
+# refactor surfaced ~8 such bugs).  These Struct types add runtime type
+# checking via ``msgspec.convert``, attribute access (``p.meta.finished``
+# instead of ``p["meta"]["finished"]``), and unify the serialization path
+# with the existing msgspec encoders.
+#
+# Dict and Struct forms coexist during migration; converters
+# (:func:`to_struct`, :func:`to_dict`) bridge the two.
+
+
+class _StructBase(msgspec.Struct, omit_defaults=True, kw_only=True, forbid_unknown_fields=True):
+    """Common base for nested payload structs.
+
+    - ``omit_defaults``: skip ``None`` fields when serializing.
+    - ``kw_only``: mirror TypedDict construction style.
+    - ``forbid_unknown_fields``: reject typos and legacy flat keys at decode time.
+    """
+
+
+class HiddenStatesStruct(_StructBase):
+    output: torch.Tensor | None = None
+    trailing_text: torch.Tensor | None = None
+    last: torch.Tensor | None = None
+    layers: dict[int, torch.Tensor] | None = None
+
+
+class EmbeddingsStruct(_StructBase):
+    prefill: torch.Tensor | None = None
+    decode: torch.Tensor | None = None
+    cached_decode: torch.Tensor | None = None
+    tts_bos: torch.Tensor | None = None
+    tts_eos: torch.Tensor | None = None
+    tts_pad: torch.Tensor | None = None
+    tts_pad_projected: torch.Tensor | None = None
+    voice: torch.Tensor | None = None
+    speech_feat: torch.Tensor | None = None
+    thinker_reply: torch.Tensor | None = None
+
+
+class CodesStruct(_StructBase):
+    audio: torch.Tensor | None = None
+    ref: torch.Tensor | None = None
+
+
+class IdsStruct(_StructBase):
+    all: list[int] | None = None
+    prompt: list[int] | None = None
+    output: list[int] | None = None
+    speech_token: list[int] | None = None
+    prior_image: list[int] | None = None
+
+
+class MetaStruct(_StructBase):
+    finished: torch.Tensor | None = None
+    left_context_size: int | None = None
+    override_keys: list[tuple[str, str]] | None = None
+    num_processed_tokens: int | None = None
+    next_stage_prompt_len: int | None = None
+    ar_width: int | None = None
+    eol_token_id: int | None = None
+    visual_token_start_id: int | None = None
+    visual_token_end_id: int | None = None
+    gen_token_mask: torch.Tensor | None = None
+    omni_task: list[str] | None = None
+    height: int | None = None
+    width: int | None = None
+    decode_flag: bool | None = None
+    codec_streaming: bool | None = None
+    ref_code_len: int | None = None
+    talker_prefill_offset: int | None = None
+
+
+class OmniPayloadStruct(_StructBase):
+    hidden_states: HiddenStatesStruct | None = None
+    embed: EmbeddingsStruct | None = None
+    ids: IdsStruct | None = None
+    codes: CodesStruct | None = None
+    meta: MetaStruct | None = None
+    latent: torch.Tensor | None = None
+    generated_len: int | None = None
+    model_outputs: list[torch.Tensor] | None = None
+    mtp_inputs: tuple[torch.Tensor, torch.Tensor] | None = None
+    speaker: Any = None
+    language: Any = None
+    request_id: str | None = None
+
+
+_NESTED_STRUCTS: dict[str, type[_StructBase]] = {
+    "hidden_states": HiddenStatesStruct,
+    "embed": EmbeddingsStruct,
+    "ids": IdsStruct,
+    "codes": CodesStruct,
+    "meta": MetaStruct,
+}
+
+
+def _msgspec_dec_hook(typ: type, obj: Any) -> Any:
+    """Bridge non-msgspec types (``torch.Tensor``) when decoding into Structs."""
+    if typ is torch.Tensor:
+        if isinstance(obj, torch.Tensor):
+            return obj
+        raise TypeError(f"cannot decode {type(obj).__name__} into torch.Tensor")
+    raise NotImplementedError(f"no decoder for {typ}")
+
+
+def _msgspec_enc_hook(obj: Any) -> Any:
+    if isinstance(obj, torch.Tensor):
+        return {
+            "__tensor__": True,
+            "data": obj.detach().cpu().contiguous().numpy().tobytes(),
+            "shape": list(obj.shape),
+            "dtype": _dtype_to_name(obj.dtype),
+        }
+    raise NotImplementedError(f"no encoder for {type(obj).__name__}")
+
+
+def to_struct(payload: dict[str, Any]) -> OmniPayloadStruct:
+    """Convert a payload dict into ``OmniPayloadStruct``, validating types.
+
+    Raises ``msgspec.ValidationError`` on:
+      * unknown top-level keys (typos, legacy flat keys)
+      * unknown sub-keys under any nested category
+      * type mismatches (e.g., ``meta.left_context_size`` not an ``int``)
+    """
+    return msgspec.convert(payload, OmniPayloadStruct, dec_hook=_msgspec_dec_hook)
+
+
+def to_dict(struct: OmniPayloadStruct) -> dict[str, Any]:
+    """Convert ``OmniPayloadStruct`` back to a plain dict, dropping unset fields.
+
+    Used during migration when downstream code still expects dicts.
+    """
+    out: dict[str, Any] = {}
+    for field in OmniPayloadStruct.__struct_fields__:
+        value = getattr(struct, field)
+        if value is None:
+            continue
+        if isinstance(value, _StructBase):
+            sub: dict[str, Any] = {}
+            for sk in value.__struct_fields__:
+                sv = getattr(value, sk)
+                if sv is not None:
+                    sub[sk] = sv
+            if sub:
+                out[field] = sub
+        else:
+            out[field] = value
+    return out
 
 
 # ── Keys whose values are nested dicts (TypedDict sub-categories) ──

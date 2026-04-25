@@ -1,12 +1,22 @@
 """Tests for data_entry_keys: TypedDict payload structure, flatten/unflatten, serialize/deserialize."""
 
+import msgspec
+import pytest
 import torch
 
 from vllm_omni.data_entry_keys import (
+    CodesStruct,
+    EmbeddingsStruct,
+    HiddenStatesStruct,
+    IdsStruct,
+    MetaStruct,
     OmniPayload,
+    OmniPayloadStruct,
     deserialize_payload,
     flatten_payload,
     serialize_payload,
+    to_dict,
+    to_struct,
     unflatten_payload,
 )
 from vllm_omni.engine import AdditionalInformationPayload
@@ -250,3 +260,76 @@ class TestSerializeDeserializePayload:
         original: OmniPayload = {"meta": {"finished": None}}
         wire = serialize_payload(original)
         assert wire is None
+
+
+class TestOmniPayloadStruct:
+    """Runtime-validated mirror of OmniPayload (msgspec.Struct)."""
+
+    def test_construct_directly(self):
+        p = OmniPayloadStruct(
+            meta=MetaStruct(left_context_size=5, finished=torch.tensor(True)),
+            codes=CodesStruct(audio=torch.zeros(3, 8)),
+        )
+        assert p.meta.left_context_size == 5
+        assert torch.equal(p.codes.audio, torch.zeros(3, 8))
+
+    def test_to_struct_validates_dict(self):
+        d = {"meta": {"left_context_size": 25, "finished": torch.tensor(False)}}
+        s = to_struct(d)
+        assert s.meta.left_context_size == 25
+
+    def test_to_struct_rejects_legacy_flat_top_level(self):
+        with pytest.raises(msgspec.ValidationError, match="unknown field"):
+            to_struct({"code_predictor_codes": torch.zeros(3, 8)})
+
+    def test_to_struct_rejects_legacy_flat_meta_field(self):
+        # `left_context_size` at top level (legacy) instead of under `meta`
+        with pytest.raises(msgspec.ValidationError, match="unknown field"):
+            to_struct({"left_context_size": 25})
+
+    def test_to_struct_rejects_typo_in_subkey(self):
+        with pytest.raises(msgspec.ValidationError, match="unknown field"):
+            to_struct({"meta": {"finisheed": True}})
+
+    def test_to_struct_rejects_wrong_type(self):
+        with pytest.raises(msgspec.ValidationError, match="Expected"):
+            to_struct({"meta": {"left_context_size": "not_an_int"}})
+
+    def test_round_trip_dict_struct_dict(self):
+        original = {
+            "meta": {"left_context_size": 7, "finished": torch.tensor(True)},
+            "codes": {"audio": torch.zeros(2, 8)},
+            "hidden_states": {"output": torch.zeros(4, 16)},
+        }
+        s = to_struct(original)
+        d = to_dict(s)
+        assert sorted(d.keys()) == sorted(original.keys())
+        for top, sub in original.items():
+            assert sorted(d[top].keys()) == sorted(sub.keys())
+
+    def test_to_dict_drops_unset_fields(self):
+        s = OmniPayloadStruct(meta=MetaStruct(left_context_size=10))
+        d = to_dict(s)
+        assert d == {"meta": {"left_context_size": 10}}
+
+    def test_struct_attr_access_catches_typos_at_lookup(self):
+        s = to_struct({"meta": {"finished": torch.tensor(True)}})
+        with pytest.raises(AttributeError):
+            _ = s.meta.finisheed
+
+    def test_struct_with_all_categories(self):
+        d = {
+            "hidden_states": {"output": torch.zeros(1)},
+            "embed": {"prefill": torch.zeros(1), "tts_bos": torch.zeros(1)},
+            "ids": {"all": [1, 2], "prompt": [1]},
+            "codes": {"audio": torch.zeros(1)},
+            "meta": {"left_context_size": 3, "num_processed_tokens": 7},
+        }
+        s = to_struct(d)
+        assert isinstance(s.hidden_states, HiddenStatesStruct)
+        assert isinstance(s.embed, EmbeddingsStruct)
+        assert isinstance(s.ids, IdsStruct)
+        assert isinstance(s.codes, CodesStruct)
+        assert isinstance(s.meta, MetaStruct)
+        assert s.ids.all == [1, 2]
+        assert s.meta.num_processed_tokens == 7

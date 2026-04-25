@@ -226,9 +226,11 @@ def talker2code2wav_async_chunk(
 
         payload = {
             "codes": {"audio": code_predictor_codes},
-            "meta": {"finished": torch.tensor(finished, dtype=torch.bool)},
+            "meta": {
+                "finished": torch.tensor(finished, dtype=torch.bool),
+                "left_context_size": token_offset,
+            },
             "token_offset": token_offset,
-            "left_context_size": token_offset,
             "req_id": [request_id],
             "stream_finished": torch.tensor(finished, dtype=torch.bool),
         }

@@ -102,18 +102,13 @@ def talker2code2wav(
             ref_code_len = 0
         # Code2Wav expects codebook-major flat: [Q*num_frames]
         codec_codes = audio_codes.transpose(0, 1).cpu().reshape(-1).tolist()
-        additional_information: dict[str, Any] = {}
-        if ref_code_len > 0:
-            additional_information["meta"] = {"left_context_size": [ref_code_len]}
-        # Propagate speaker and language from the original prompt so they are
-        # available as runtime_additional_information in later pipeline stages,
-        # consistent with qwen3-omni and qwen2.5-omni stage input processors.
-        speaker = extract_speaker_from_prompt(prompt, index=i)
-        if speaker is not None:
-            additional_information["speaker"] = speaker
-        language = extract_language_from_prompt(prompt, index=i)
-        if language is not None:
-            additional_information["language"] = language
+        additional_information = to_dict(
+            OmniPayloadStruct(
+                meta=MetaStruct(left_context_size=ref_code_len) if ref_code_len > 0 else None,
+                speaker=extract_speaker_from_prompt(prompt, index=i),
+                language=extract_language_from_prompt(prompt, index=i),
+            )
+        )
         code2wav_inputs.append(
             OmniTokensPrompt(
                 prompt_token_ids=codec_codes,

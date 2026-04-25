@@ -5,6 +5,14 @@ from typing import Any
 import torch
 from vllm.logger import init_logger
 
+from vllm_omni.data_entry_keys import (
+    CodesStruct,
+    MetaStruct,
+    OmniPayload,
+    OmniPayloadStruct,
+    to_dict,
+)
+
 logger = init_logger(__name__)
 
 
@@ -61,7 +69,7 @@ def slow_ar_to_dac_decoder_async_chunk(
     pooling_output: dict[str, Any] | None,
     request: Any,
     is_finished: bool = False,
-) -> dict[str, Any] | None:
+) -> OmniPayload | None:
     """Async streaming processor: emit code chunks as they are produced.
 
     Accumulates per-step codes and emits fixed-size chunks with left context
@@ -140,9 +148,14 @@ def slow_ar_to_dac_decoder_async_chunk(
 
     # Pack into codebook-major flat codes.
     stacked_frames = torch.stack(window_frames, dim=0)
-    code_predictor_codes = stacked_frames.transpose(0, 1).reshape(-1).tolist()
+    code_predictor_codes = stacked_frames.transpose(0, 1).reshape(-1)
 
-    return {
-        "codes": {"audio": code_predictor_codes},
-        "meta": {"left_context_size": left_context_size, "finished": torch.tensor(finished, dtype=torch.bool)},
-    }
+    return to_dict(
+        OmniPayloadStruct(
+            codes=CodesStruct(audio=code_predictor_codes),
+            meta=MetaStruct(
+                left_context_size=left_context_size,
+                finished=torch.tensor(finished, dtype=torch.bool),
+            ),
+        )
+    )

@@ -130,6 +130,7 @@ class _StructBase(msgspec.Struct, omit_defaults=True, kw_only=True, forbid_unkno
 
 class HiddenStatesStruct(_StructBase):
     output: torch.Tensor | None = None
+    output_shape: list[int] | None = None
     trailing_text: torch.Tensor | None = None
     last: torch.Tensor | None = None
     layers: dict[int, torch.Tensor] | None = None
@@ -137,6 +138,7 @@ class HiddenStatesStruct(_StructBase):
 
 class EmbeddingsStruct(_StructBase):
     prefill: torch.Tensor | None = None
+    prefill_shape: list[int] | None = None
     decode: torch.Tensor | None = None
     cached_decode: torch.Tensor | None = None
     tts_bos: torch.Tensor | None = None

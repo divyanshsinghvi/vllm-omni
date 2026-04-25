@@ -236,7 +236,7 @@ class Qwen3TTSCode2Wav(nn.Module):
                     break
                 meta = info.get("meta", {})
                 if "left_context_size" in meta:
-                    left_context_size[i] = int(meta["left_context_size"])
+                    left_context_size[i] = meta["left_context_size"]
         for i, req_ids in enumerate(request_ids_list):
             if req_ids.numel() < 1:
                 parsed.append((0, 0))

@@ -8,7 +8,7 @@ from typing import Any
 import torch
 from vllm.v1.request import Request, RequestStatus
 
-from vllm_omni.data_entry_keys import unflatten_payload
+from vllm_omni.data_entry_keys import OmniPayload, unflatten_payload
 
 from ..factory import OmniConnectorFactory
 from ..utils.config import ConnectorSpec
@@ -193,7 +193,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
 
         return False
 
-    def _update_request_payload(self, req_id: str, payload_data: dict[str, Any]) -> dict[str, Any]:
+    def _update_request_payload(self, req_id: str, payload_data: OmniPayload) -> OmniPayload:
         """Update the stored payload for *req_id* with the latest chunk."""
         if req_id not in self.request_payload:
             self.request_payload[req_id] = payload_data

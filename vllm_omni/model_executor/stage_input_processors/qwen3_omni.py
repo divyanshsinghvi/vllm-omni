@@ -287,10 +287,10 @@ def _get_streaming_codec_delta_len(
 
 def thinker2talker_async_chunk(
     transfer_manager: Any,
-    pooling_output: dict[str, Any],
+    pooling_output: OmniPayload,
     request: OmniEngineCoreRequest,
     is_finished: bool = False,
-) -> list[dict[str, Any]]:
+) -> OmniPayload | None:
     """
     Process thinker outputs to create talker inputs.
     1. thinker's text generation outputs (token IDs + hidden states)
@@ -500,10 +500,10 @@ def thinker2talker(
 
 def talker2code2wav_async_chunk(
     transfer_manager: Any,
-    pooling_output: dict[str, Any],
+    pooling_output: OmniPayload,
     request: OmniEngineCoreRequest,
     is_finished: bool = False,
-):
+) -> OmniPayload | None:
     """
     Pooling version.
     """

@@ -5,6 +5,7 @@ from typing import Any
 import torch
 from vllm.logger import init_logger
 
+from vllm_omni.data_entry_keys import OmniPayload
 from vllm_omni.model_executor.stage_input_processors.chunk_size_utils import (
     compute_dynamic_initial_chunk_size,
     max_ic_for_chunk_size,
@@ -118,7 +119,7 @@ def talker2code2wav(
     return code2wav_inputs
 
 
-def _extract_last_frame(pooling_output: dict[str, Any]) -> torch.Tensor | None:
+def _extract_last_frame(pooling_output: OmniPayload) -> torch.Tensor | None:
     audio_codes = pooling_output.get("codes", {}).get("audio")
     if not isinstance(audio_codes, torch.Tensor) or audio_codes.numel() == 0:
         return None
@@ -134,10 +135,10 @@ def _extract_last_frame(pooling_output: dict[str, Any]) -> torch.Tensor | None:
 
 def talker2code2wav_async_chunk(
     transfer_manager: Any,
-    pooling_output: dict[str, Any] | None,
+    pooling_output: OmniPayload | None,
     request: Any,
     is_finished: bool = False,
-) -> dict[str, Any] | None:
+) -> OmniPayload | None:
     request_id = request.external_req_id
     finished = bool(is_finished or request.is_finished())
     request_payload = getattr(transfer_manager, "request_payload", None)

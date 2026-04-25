@@ -24,6 +24,7 @@ import torch
 from vllm.distributed.parallel_state import get_tp_group
 from vllm.logger import init_logger
 
+from vllm_omni.data_entry_keys import OmniPayload
 from vllm_omni.distributed.omni_connectors.factory import OmniConnectorFactory
 from vllm_omni.distributed.omni_connectors.utils.config import ConnectorSpec
 from vllm_omni.outputs import OmniConnectorOutput
@@ -341,15 +342,15 @@ class OmniConnectorModelRunnerMixin:
     #  Local payload cache (RFC §2.4 – Model Runner ownership)
     # ------------------------------------------------------------------ #
 
-    def put_local_stage_payload(self, req_id: str, payload: dict[str, Any]) -> None:
+    def put_local_stage_payload(self, req_id: str, payload: OmniPayload) -> None:
         """Store a full stage payload in the local cache."""
         self._local_stage_payload_cache[req_id] = payload
 
-    def get_local_stage_payload(self, req_id: str) -> dict[str, Any] | None:
+    def get_local_stage_payload(self, req_id: str) -> OmniPayload | None:
         """Read a stage payload without removing it."""
         return self._local_stage_payload_cache.get(req_id)
 
-    def pop_local_stage_payload(self, req_id: str) -> dict[str, Any] | None:
+    def pop_local_stage_payload(self, req_id: str) -> OmniPayload | None:
         """Remove and return a stage payload (consume after use)."""
         return self._local_stage_payload_cache.pop(req_id, None)
 
@@ -366,7 +367,7 @@ class OmniConnectorModelRunnerMixin:
     # ------------------------------------------------------------------ #
 
     @classmethod
-    def _extract_scheduling_metadata(cls, payload: dict[str, Any]) -> dict[str, Any]:
+    def _extract_scheduling_metadata(cls, payload: OmniPayload) -> dict[str, Any]:
         """Extract only the fields the scheduler needs from a full payload."""
         extracted: dict[str, Any] = {}
         if "next_stage_prompt_len" in payload:
@@ -427,7 +428,7 @@ class OmniConnectorModelRunnerMixin:
         return None
 
     @classmethod
-    def _payload_is_consumable(cls, payload: dict[str, Any] | None) -> bool:
+    def _payload_is_consumable(cls, payload: OmniPayload | None) -> bool:
         """Return True when an async payload can drive a real forward step.
 
         Metadata-only wake-ups should not transition WAITING_FOR_CHUNK requests
@@ -1791,7 +1792,7 @@ class OmniConnectorModelRunnerMixin:
     #  Payload accumulation  (ported from OmniChunkTransferAdapter)
     # ------------------------------------------------------------------ #
 
-    def _accumulate_payload(self, req_id: str, payload_data: dict[str, Any]) -> dict[str, Any]:
+    def _accumulate_payload(self, req_id: str, payload_data: OmniPayload) -> OmniPayload:
         """Accumulate chunk payloads (concat tensors, extend lists).
 
         Returns a **shallow copy** of the accumulated state so callers

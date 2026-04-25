@@ -4,6 +4,7 @@ import torch
 from vllm.inputs import TextPrompt
 from vllm.logger import init_logger
 
+from vllm_omni.data_entry_keys import OmniPayload
 from vllm_omni.inputs.data import OmniTokensPrompt
 from vllm_omni.model_executor.models.mimo_audio.config_mimo_audio import TALKER_CODEC_PAD_TOKEN_ID
 
@@ -114,10 +115,10 @@ def _to_code_tensor(codes: Any) -> torch.Tensor | None:
 
 def llm2code2wav_async_chunk(
     transfer_manager: Any,
-    pooling_output: dict[str, Any],
+    pooling_output: OmniPayload,
     request: Any,
     is_finished: bool = False,
-) -> dict[str, Any] | None:
+) -> OmniPayload | None:
     """
     Async chunk version: convert stage-0 pooling_output to code2wav payload (pooling / connector accumulation).
 

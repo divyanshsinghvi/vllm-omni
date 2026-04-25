@@ -162,7 +162,11 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
                 if meta.get("finished"):
                     self.finished_requests.add(req_id)
 
-                new_ids = payload_data.get("codes", {}).get("audio", [])
+                new_ids = payload_data.get("codes", {}).get("audio")
+                if isinstance(new_ids, torch.Tensor):
+                    new_ids = new_ids.tolist()
+                elif new_ids is None:
+                    new_ids = []
                 request.prompt_token_ids = new_ids
                 prev_info = getattr(request, "additional_information", None)
                 info = dict(prev_info) if isinstance(prev_info, dict) else {}

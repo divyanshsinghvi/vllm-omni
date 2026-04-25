@@ -558,12 +558,7 @@ def talker2code2wav_async_chunk(
     left_context_size = max(0, min(length - context_length, left_context_size_config))
     end_index = min(length, left_context_size + context_length)
 
-    codes = (
-        torch.tensor(transfer_manager.code_prompt_token_ids[request_id][-end_index:])
-        .transpose(0, 1)
-        .reshape(-1)
-        .tolist()
-    )
+    codes = torch.tensor(transfer_manager.code_prompt_token_ids[request_id][-end_index:]).transpose(0, 1).reshape(-1)
 
     return to_dict(
         OmniPayloadStruct(

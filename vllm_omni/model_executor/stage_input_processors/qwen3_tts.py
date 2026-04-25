@@ -260,7 +260,10 @@ def talker2code2wav_async_chunk(
 
     num_quantizers = len(window_frames[0])
     num_frames = len(window_frames)
-    code_predictor_codes = [window_frames[f][q] for q in range(num_quantizers) for f in range(num_frames)]
+    code_predictor_codes = torch.tensor(
+        [window_frames[f][q] for q in range(num_quantizers) for f in range(num_frames)],
+        dtype=torch.long,
+    )
 
     payload = OmniPayloadStruct(
         codes=CodesStruct(audio=code_predictor_codes),

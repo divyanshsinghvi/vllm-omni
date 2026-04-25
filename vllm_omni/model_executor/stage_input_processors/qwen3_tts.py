@@ -5,7 +5,13 @@ from typing import Any
 import torch
 from vllm.logger import init_logger
 
-from vllm_omni.data_entry_keys import OmniPayload
+from vllm_omni.data_entry_keys import (
+    CodesStruct,
+    MetaStruct,
+    OmniPayload,
+    OmniPayloadStruct,
+    to_dict,
+)
 from vllm_omni.model_executor.stage_input_processors.chunk_size_utils import (
     compute_dynamic_initial_chunk_size,
     max_ic_for_chunk_size,
@@ -256,17 +262,13 @@ def talker2code2wav_async_chunk(
     num_frames = len(window_frames)
     code_predictor_codes = [window_frames[f][q] for q in range(num_quantizers) for f in range(num_frames)]
 
-    info: dict[str, Any] = {
-        "codes": {"audio": code_predictor_codes},
-        "meta": {"left_context_size": left_context_size, "finished": torch.tensor(finished, dtype=torch.bool)},
-    }
-    # Propagate speaker and language from the request so they are available
-    # as runtime_additional_information in subsequent pipeline stages, consistent
-    # with qwen3-omni and qwen2.5-omni stage input processors.
-    speaker = extract_speaker_from_request(request)
-    if speaker is not None:
-        info["speaker"] = speaker
-    language = extract_language_from_request(request)
-    if language is not None:
-        info["language"] = language
-    return info
+    payload = OmniPayloadStruct(
+        codes=CodesStruct(audio=code_predictor_codes),
+        meta=MetaStruct(
+            left_context_size=left_context_size,
+            finished=torch.tensor(finished, dtype=torch.bool),
+        ),
+        speaker=extract_speaker_from_request(request),
+        language=extract_language_from_request(request),
+    )
+    return to_dict(payload)

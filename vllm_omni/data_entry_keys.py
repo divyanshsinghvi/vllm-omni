@@ -151,7 +151,8 @@ class EmbeddingsStruct(_StructBase):
 class CodesStruct(_StructBase):
     # ``audio`` is a tensor inside the model (talker output), but a flattened
     # ``list[int]`` once the codes are prepared for the wire / next-stage prompt.
-    audio: torch.Tensor | list[int] | None = None
+    # msgspec does not allow union of custom type + builtin, so use ``Any`` here.
+    audio: Any = None
     ref: torch.Tensor | None = None
 
 

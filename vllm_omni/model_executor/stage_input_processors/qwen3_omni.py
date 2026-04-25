@@ -11,7 +11,13 @@ import torch
 from vllm.inputs import TextPrompt
 from vllm.platforms import current_platform
 
-from vllm_omni.data_entry_keys import OmniPayload
+from vllm_omni.data_entry_keys import (
+    CodesStruct,
+    MetaStruct,
+    OmniPayload,
+    OmniPayloadStruct,
+    to_dict,
+)
 from vllm_omni.engine import OmniEngineCoreRequest
 from vllm_omni.inputs.data import OmniTokensPrompt
 from vllm_omni.model_executor.stage_input_processors.tts_utils import (
@@ -559,10 +565,15 @@ def talker2code2wav_async_chunk(
         .tolist()
     )
 
-    return {
-        "codes": {"audio": codes},
-        "meta": {"left_context_size": left_context_size, "finished": torch.tensor(is_finished, dtype=torch.bool)},
-    }
+    return to_dict(
+        OmniPayloadStruct(
+            codes=CodesStruct(audio=codes),
+            meta=MetaStruct(
+                left_context_size=left_context_size,
+                finished=torch.tensor(is_finished, dtype=torch.bool),
+            ),
+        )
+    )
 
 
 def talker2code2wav(

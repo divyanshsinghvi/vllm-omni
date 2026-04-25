@@ -442,36 +442,26 @@ def thinker2talker(
             except Exception as exc:
                 logger.warning("[PD] Could not merge prefill embeddings: %s", exc)
 
-        payload: OmniPayload = {
-            "embed": {
-                "prefill": thinker_emb,
-                "tts_bos": _resolve_tts_token_embedding(
+        payload = OmniPayloadStruct(
+            embed=EmbeddingsStruct(
+                prefill=thinker_emb,
+                tts_bos=_resolve_tts_token_embedding(
                     "tts_bos", thinker_mm=thinker_mm, prefill_mm=prefill_mm, device=device
                 ),
-                "tts_eos": _resolve_tts_token_embedding(
+                tts_eos=_resolve_tts_token_embedding(
                     "tts_eos", thinker_mm=thinker_mm, prefill_mm=prefill_mm, device=device
                 ),
-                "tts_pad": _resolve_tts_token_embedding(
+                tts_pad=_resolve_tts_token_embedding(
                     "tts_pad", thinker_mm=thinker_mm, prefill_mm=prefill_mm, device=device
                 ),
-            },
-            "hidden_states": {
-                "output": thinker_hid,
-            },
-            "ids": {
-                "all": thinker_sequences,
-                "prompt": thinker_input_ids,
-            },
-        }
-        info = payload
-        speaker = extract_speaker_from_prompt(prompt, index=i)
-        if speaker is not None:
-            info["speaker"] = speaker
-        language = extract_language_from_prompt(prompt, index=i)
-        if language is not None:
-            info["language"] = language
-
-        prompt_len = _compute_talker_prompt_ids_length(payload, device=device)
+            ),
+            hidden_states=HiddenStatesStruct(output=thinker_hid),
+            ids=IdsStruct(all=thinker_sequences, prompt=thinker_input_ids),
+            speaker=extract_speaker_from_prompt(prompt, index=i),
+            language=extract_language_from_prompt(prompt, index=i),
+        )
+        info = to_dict(payload)
+        prompt_len = _compute_talker_prompt_ids_length(info, device=device)
 
         talker_inputs.append(
             OmniTokensPrompt(

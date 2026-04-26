@@ -175,8 +175,8 @@ class OmniPayloadStruct(_StructBase):
     generated_len: int | None = None
     model_outputs: list[torch.Tensor] | None = None
     mtp_inputs: tuple[torch.Tensor, torch.Tensor] | None = None
-    speaker: Any = None
-    language: Any = None
+    speaker: list[str] | str | None = None
+    language: list[str] | str | None = None
     request_id: str | None = None
     past_key_values: list[int] | None = None
     kv_metadata: dict[str, Any] | None = None

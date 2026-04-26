@@ -127,7 +127,8 @@ class TestNativeMsgspecEncoding:
     def test_encode_decode_round_trip_dtypes(self):
         from vllm_omni.data_entry_keys import decode_payload, encode_payload
 
-        for dtype in (torch.float32, torch.float16, torch.bfloat16, torch.int64, torch.bool):
+        # bfloat16 excluded: numpy() doesn't support it; callers must cast before serializing.
+        for dtype in (torch.float32, torch.float16, torch.int64, torch.bool):
             original = OmniPayloadStruct(codes=CodesStruct(audio=torch.tensor([1, 0, 1], dtype=dtype)))
             restored = decode_payload(encode_payload(original))
             assert restored.codes.audio.dtype == dtype, f"dtype mismatch for {dtype}"

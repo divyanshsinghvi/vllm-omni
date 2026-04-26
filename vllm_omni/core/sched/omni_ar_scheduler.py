@@ -20,7 +20,6 @@ from vllm.v1.spec_decode.metrics import SpecDecodingStats
 
 from vllm_omni.core.sched.omni_scheduler_mixin import OmniSchedulerMixin
 from vllm_omni.core.sched.output import OmniSchedulerOutput
-from vllm_omni.data_entry_keys import to_struct
 from vllm_omni.distributed.omni_connectors.transfer_adapter.chunk_transfer_adapter import (
     OmniChunkTransferAdapter,
 )
@@ -110,7 +109,7 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
             result = False
         else:
             info = deserialize_additional_information(payload)
-            result = info.get("meta", {}).get("omni_final_stage_id") == 0
+            result = info.get("omni_final_stage_id") == 0
 
         self._omits_kv_transfer_cache[rid] = result
         return result
@@ -629,9 +628,20 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
                     }
                     # Also update request.additional_information for good measure
                     add_info = getattr(request, "additional_information", None)
-                    merged: dict[str, Any] = deserialize_additional_information(add_info)
-                    merged.update(kv_xfer_params)
-                    request.additional_information = to_struct(merged)
+                    # If additional_information is an AdditionalInformationPayload-like object,
+                    # unpack it into a plain dict.
+                    if (
+                        add_info is not None
+                        and hasattr(add_info, "entries")
+                        and isinstance(getattr(add_info, "entries"), dict)
+                    ):
+                        request.additional_information = deserialize_additional_information(add_info)
+                        add_info = request.additional_information
+                    if add_info is None:
+                        request.additional_information = {}
+                        add_info = request.additional_information
+                    if isinstance(add_info, dict):
+                        add_info.update(kv_xfer_params)
 
                 return kv_xfer_params
 

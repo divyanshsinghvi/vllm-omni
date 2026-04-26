@@ -11,8 +11,6 @@ from vllm.v1.engine import (
     EngineCoreRequest,
 )
 
-from vllm_omni.data_entry_keys import OmniPayloadStruct
-
 
 class PromptEmbedsPayload(msgspec.Struct):
     """Serialized prompt embeddings payload for direct transfer.
@@ -27,6 +25,37 @@ class PromptEmbedsPayload(msgspec.Struct):
     dtype: str
 
 
+class AdditionalInformationEntry(msgspec.Struct):
+    """One entry of additional_information.
+
+    Three supported forms are encoded:
+      - tensor: data/shape/dtype
+      - list: a Python list (msgspec-serializable)
+      - scalar: a Python scalar (msgspec-serializable)
+    Exactly one of (tensor_data, list_data, scalar_data) should be non-None.
+    """
+
+    # Tensor form
+    tensor_data: bytes | None = None
+    tensor_shape: list[int] | None = None
+    tensor_dtype: str | None = None
+
+    # List form
+    list_data: list[Any] | None = None
+
+    # Scalar form
+    scalar_data: Any | None = None
+
+
+class AdditionalInformationPayload(msgspec.Struct):
+    """Serialized dictionary payload for additional_information.
+
+    Keys are strings; values are encoded as AdditionalInformationEntry.
+    """
+
+    entries: dict[str, AdditionalInformationEntry]
+
+
 class OmniEngineCoreRequest(EngineCoreRequest):
     """Engine core request for omni models with embeddings support.
 
@@ -37,9 +66,14 @@ class OmniEngineCoreRequest(EngineCoreRequest):
     Note: prompt_embeds is inherited from EngineCoreRequest
     (torch.Tensor | None). PromptEmbedsPayload should be decoded to
     torch.Tensor before constructing this request.
+
+    Attributes:
+        additional_information: Optional serialized additional information
+            dictionary containing tensors or lists to pass along with the request
     """
 
-    additional_information: OmniPayloadStruct | None = None
+    # Optional additional information dictionary (serialized)
+    additional_information: AdditionalInformationPayload | None = None
 
 
 class OmniEngineCoreOutput(EngineCoreOutput):

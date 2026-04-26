@@ -118,16 +118,18 @@ def talker2code2wav_async_chunk(
         if not isinstance(request_state, dict) or "_cosyvoice3_async_state" not in request_state:
             with nullcontext():
                 info = _decode_additional_information(getattr(request, "additional_information", None))
+                info_embed = info.get("embed", {}) if isinstance(info, dict) else {}
                 prompt_payload = {}
                 for key in ("speech_token", "speech_feat", "embedding"):
-                    value = _to_cpu_tensor(info.get(key))
+                    value = _to_cpu_tensor(info_embed.get(key))
                     if value is not None:
                         prompt_payload[key] = value
                 if isinstance(pooling_output, dict):
+                    po_embed = pooling_output.get("embed", {}) if isinstance(pooling_output.get("embed"), dict) else {}
                     for key in ("speech_token", "speech_feat", "embedding"):
                         if key in prompt_payload:
                             continue
-                        value = _to_cpu_tensor(pooling_output.get(key))
+                        value = _to_cpu_tensor(po_embed.get(key))
                         if value is not None:
                             prompt_payload[key] = value
                 prompt_token = prompt_payload.get("speech_token")

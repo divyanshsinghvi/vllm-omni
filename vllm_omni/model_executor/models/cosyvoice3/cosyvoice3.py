@@ -32,6 +32,7 @@ from vllm.v1.outputs import SamplerOutput
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler
 
+from vllm_omni.data_entry_keys import EmbeddingsStruct, OmniPayloadStruct, to_dict
 from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
 from vllm_omni.model_executor.models.cosyvoice3.utils import (
     concat_text_with_prompt_ids,
@@ -674,12 +675,17 @@ class CosyVoice3Model(
             multimodal_outputs = {}
 
             if "speech_token" in kwargs:
-                # Wrap in lists to pass through gpu_ar_model_runner shape filtering
-                multimodal_outputs = {
-                    "speech_token": [kwargs.get("speech_token")],
-                    "speech_feat": [kwargs.get("speech_feat")],
-                    "embedding": [kwargs.get("embedding")],
-                }
+                # Prompt conditioning tensors for code2wav: live under
+                # ``embed.*`` per OmniPayloadStruct schema.
+                multimodal_outputs = to_dict(
+                    OmniPayloadStruct(
+                        embed=EmbeddingsStruct(
+                            speech_token=kwargs.get("speech_token"),
+                            speech_feat=kwargs.get("speech_feat"),
+                            embedding=kwargs.get("embedding"),
+                        ),
+                    )
+                )
 
             return OmniOutput(text_hidden_states=hidden_states, multimodal_outputs=multimodal_outputs)
         elif self.model_stage == "cosyvoice3_code2wav":
@@ -705,9 +711,10 @@ class CosyVoice3Model(
                 info = runtime_info[idx] if idx < len(runtime_info) and isinstance(runtime_info[idx], dict) else {}
                 req_id = self._as_str(info.get("req_id")) if info else None
                 stream_finished = self._as_bool(info.get("stream_finished")) if info else False
-                speech_token = self._as_tensor(info.get("speech_token")) if info else None
-                speech_feat = self._as_tensor(info.get("speech_feat")) if info else None
-                embedding = self._as_tensor(info.get("embedding")) if info else None
+                embed_info = info.get("embed", {}) if info else {}
+                speech_token = self._as_tensor(embed_info.get("speech_token")) if embed_info else None
+                speech_feat = self._as_tensor(embed_info.get("speech_feat")) if embed_info else None
+                embedding = self._as_tensor(embed_info.get("embedding")) if embed_info else None
                 if speech_token is None or speech_feat is None or embedding is None:
                     if stream_finished and req_id is not None and hasattr(self, "_stream_vocoder_cache_by_req"):
                         with self._stream_audio_cache_lock:

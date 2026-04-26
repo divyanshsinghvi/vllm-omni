@@ -39,6 +39,8 @@ class Embeddings(TypedDict, total=False):
     tts_pad_projected: torch.Tensor
     voice: torch.Tensor
     speech_feat: torch.Tensor
+    speech_token: torch.Tensor
+    embedding: torch.Tensor
     thinker_reply: torch.Tensor
 
 
@@ -116,6 +118,8 @@ class EmbeddingsStruct(_StructBase):
     tts_pad_projected: torch.Tensor | None = None
     voice: torch.Tensor | None = None
     speech_feat: torch.Tensor | None = None
+    speech_token: torch.Tensor | None = None
+    embedding: torch.Tensor | None = None
     thinker_reply: torch.Tensor | None = None
 
 

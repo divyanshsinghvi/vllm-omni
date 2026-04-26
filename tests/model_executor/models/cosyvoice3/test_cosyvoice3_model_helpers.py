@@ -147,9 +147,11 @@ def test_forward_prefers_token_offset_when_present():
 
     runtime_info = [
         {
-            "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
-            "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
-            "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
+            "embed": {
+                "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
+                "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
+                "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
+            },
             "meta": {"left_context_size": 2},
         }
     ]
@@ -175,9 +177,11 @@ def test_forward_falls_back_to_left_context_size_for_backward_compat():
 
     runtime_info = [
         {
-            "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
-            "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
-            "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
+            "embed": {
+                "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
+                "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
+                "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
+            },
             "meta": {"left_context_size": 2},
         }
     ]
@@ -196,9 +200,11 @@ def test_forward_ignores_single_request_padded_tail_tokens():
     model = _make_code2wav_model(with_stride_cfg=True)
     runtime_info = [
         {
-            "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
-            "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
-            "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
+            "embed": {
+                "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
+                "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
+                "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
+            },
             "meta": {"left_context_size": 0},
         }
     ]
@@ -220,9 +226,11 @@ def test_forward_uses_non_stream_decode_without_chunk_metadata():
 
     runtime_info = [
         {
-            "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
-            "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
-            "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
+            "embed": {
+                "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
+                "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
+                "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
+            },
             "prefix_ids": [101, 102],
             "generated_len": 3,
         }
@@ -258,9 +266,11 @@ def test_forward_reuses_streaming_cache_state_between_chunks():
     runtime_info = [
         {
             "req_id": ["rid-stream"],
-            "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
-            "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
-            "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
+            "embed": {
+                "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
+                "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
+                "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
+            },
             "token_offset": 0,
             "stream_finished": torch.tensor(False),
         }
@@ -304,9 +314,11 @@ def test_forward_clears_streaming_cache_on_terminal_chunk():
     runtime_info = [
         {
             "req_id": ["rid-stream"],
-            "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
-            "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
-            "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
+            "embed": {
+                "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
+                "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
+                "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
+            },
             "token_offset": 0,
             "stream_finished": torch.tensor(False),
         }

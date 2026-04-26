@@ -265,14 +265,16 @@ def test_forward_reuses_streaming_cache_state_between_chunks():
     )
     runtime_info = [
         {
-            "req_id": ["rid-stream"],
             "embed": {
                 "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
                 "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
                 "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
             },
-            "token_offset": 0,
-            "stream_finished": torch.tensor(False),
+            "meta": {
+                "req_id": ["rid-stream"],
+                "stream_finished": torch.tensor(False),
+                "left_context_size": 0,
+            },
         }
     ]
 
@@ -313,14 +315,16 @@ def test_forward_clears_streaming_cache_on_terminal_chunk():
     )
     runtime_info = [
         {
-            "req_id": ["rid-stream"],
             "embed": {
                 "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
                 "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
                 "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
             },
-            "token_offset": 0,
-            "stream_finished": torch.tensor(False),
+            "meta": {
+                "req_id": ["rid-stream"],
+                "stream_finished": torch.tensor(False),
+                "left_context_size": 0,
+            },
         }
     ]
 
@@ -332,7 +336,7 @@ def test_forward_clears_streaming_cache_on_terminal_chunk():
     )
     assert "rid-stream" in model._stream_vocoder_cache_by_req
 
-    runtime_info[0]["stream_finished"] = torch.tensor(True)
+    runtime_info[0]["meta"]["stream_finished"] = torch.tensor(True)
     out = model.forward(
         input_ids=torch.tensor([0, 1, 2], dtype=torch.long),
         positions=torch.tensor([0, 1, 2], dtype=torch.long),

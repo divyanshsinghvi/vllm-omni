@@ -59,6 +59,8 @@ class Ids(TypedDict, total=False):
 
 class OmniPayloadMeta(TypedDict, total=False):
     finished: torch.Tensor
+    stream_finished: torch.Tensor
+    req_id: list[str]
     left_context_size: int
     override_keys: list[tuple[str, str]]
     num_processed_tokens: int
@@ -138,6 +140,8 @@ class IdsStruct(_StructBase):
 
 class MetaStruct(_StructBase):
     finished: torch.Tensor | None = None
+    stream_finished: torch.Tensor | None = None
+    req_id: list[str] | None = None
     left_context_size: int | None = None
     override_keys: list[tuple[str, str]] | None = None
     num_processed_tokens: int | None = None

@@ -709,8 +709,9 @@ class CosyVoice3Model(
 
             for idx, req_ids in enumerate(request_ids_list):
                 info = runtime_info[idx] if idx < len(runtime_info) and isinstance(runtime_info[idx], dict) else {}
-                req_id = self._as_str(info.get("req_id")) if info else None
-                stream_finished = self._as_bool(info.get("stream_finished")) if info else False
+                meta_info = info.get("meta", {}) if info else {}
+                req_id = self._as_str(meta_info.get("req_id"))
+                stream_finished = self._as_bool(meta_info.get("stream_finished"))
                 embed_info = info.get("embed", {}) if info else {}
                 speech_token = self._as_tensor(embed_info.get("speech_token")) if embed_info else None
                 speech_feat = self._as_tensor(embed_info.get("speech_feat")) if embed_info else None
@@ -752,7 +753,7 @@ class CosyVoice3Model(
                 # runner, so only explicit chunk-routing fields should switch
                 # code2wav into the streaming path.
                 meta = info.get("meta", {}) if info else {}
-                uses_streaming_decode = bool(info) and ("stream_finished" in info or "left_context_size" in meta)
+                uses_streaming_decode = bool(info) and ("stream_finished" in meta or "left_context_size" in meta)
                 if uses_streaming_decode:
                     token_offset = max(0, meta.get("left_context_size", 0))
 

@@ -68,9 +68,11 @@ def test_talker2code2wav_async_chunk_final_payload_uses_absolute_token_offset():
         external_req_id="rid-0",
         output_token_ids=[1, 2, 6562, 3],
         additional_information={
-            "speech_token": [torch.tensor([[11, 12, 13]])],
-            "speech_feat": [torch.tensor([[[0.1, 0.2], [0.3, 0.4]]])],
-            "embedding": [torch.tensor([[0.5, 0.6]])],
+            "embed": {
+                "speech_token": [torch.tensor([[11, 12, 13]])],
+                "speech_feat": [torch.tensor([[[0.1, 0.2], [0.3, 0.4]]])],
+                "embedding": [torch.tensor([[0.5, 0.6]])],
+            },
         },
         is_finished=lambda: True,
     )
@@ -211,7 +213,7 @@ def test_talker2code2wav_async_chunk_respects_prompt_token_pad_on_first_chunk():
         external_req_id="rid-pad",
         output_token_ids=[8, 9, 10],
         additional_information={
-            "speech_token": [torch.tensor([[1, 2, 3]])],
+            "embed": {"speech_token": [torch.tensor([[1, 2, 3]])]},
         },
         is_finished=lambda: False,
     )

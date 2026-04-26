@@ -150,8 +150,7 @@ def test_forward_prefers_token_offset_when_present():
             "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
             "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
             "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
-            "token_offset": 2,
-            "left_context_size": 1,
+            "meta": {"left_context_size": 2},
         }
     ]
 
@@ -179,7 +178,7 @@ def test_forward_falls_back_to_left_context_size_for_backward_compat():
             "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
             "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
             "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
-            "left_context_size": 2,
+            "meta": {"left_context_size": 2},
         }
     ]
 
@@ -200,7 +199,7 @@ def test_forward_ignores_single_request_padded_tail_tokens():
             "speech_token": torch.tensor([[1, 2, 3]], dtype=torch.long),
             "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
             "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
-            "token_offset": 0,
+            "meta": {"left_context_size": 0},
         }
     ]
 

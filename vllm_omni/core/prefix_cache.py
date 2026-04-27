@@ -133,6 +133,14 @@ class OmniTensorPrefixCache:
                 multimodal_outputs,
                 seq_len=num_tokens_padded,
             )
+            # DEBUG: PCDIAG
+            logger.warning(
+                "[PCDIAG] update: tokens_unpadded=%d tokens_padded=%d mm_input_keys=%s mm_cache_keys=%s",
+                num_tokens_unpadded,
+                num_tokens_padded,
+                sorted(multimodal_outputs.keys()),
+                sorted(self.mm_cache_keys),
+            )
 
             for mm_out_key, mm_cache in self.mm_outputs_cache.items():
                 if mm_out_key in multimodal_outputs:
@@ -244,11 +252,27 @@ class OmniTensorPrefixCache:
                 start = query_start_loc[req_idx]
                 new_hs = hidden_states[start : start + num_scheduled_tokens[req_id]]
                 combined_hidden_states[req_id] = torch.cat([cached_hs, new_hs], dim=0)
+                # DEBUG: PCDIAG
+                logger.warning(
+                    "[PCDIAG] merge req=%s hit=True num_scheduled=%d cached_shape=%s new_shape=%s combined_shape=%s",
+                    req_id,
+                    num_scheduled_tokens[req_id],
+                    list(cached_hs.shape),
+                    list(new_hs.shape),
+                    list(combined_hidden_states[req_id].shape),
+                )
             else:
                 # cache miss for this request, pass through normally
                 start = query_start_loc[req_idx]
                 new_hs = hidden_states[start : start + num_scheduled_tokens[req_id]]
                 combined_hidden_states[req_id] = new_hs
+                # DEBUG: PCDIAG
+                logger.warning(
+                    "[PCDIAG] merge req=%s hit=False num_scheduled=%d new_shape=%s",
+                    req_id,
+                    num_scheduled_tokens[req_id],
+                    list(new_hs.shape),
+                )
 
         return combined_hidden_states
 
@@ -259,6 +283,14 @@ class OmniTensorPrefixCache:
         num_computed = input_batch.num_computed_tokens_cpu[req_idx]
         # NOTE: vLLM only caches full blocks
         num_cached_blocks = num_computed // self.block_size
+        # DEBUG: PCDIAG
+        logger.warning(
+            "[PCDIAG] cached_blocks: req_idx=%d num_computed=%d block_size=%d num_cached_blocks=%d",
+            req_idx,
+            int(num_computed),
+            int(self.block_size),
+            int(num_cached_blocks),
+        )
         # Get the block IDs attached to this cache hit and reindex into
         # the flattened cached hidden states (i.e., 1 row per token).
         return input_batch.block_table[0].block_table.cpu[req_idx, :num_cached_blocks]

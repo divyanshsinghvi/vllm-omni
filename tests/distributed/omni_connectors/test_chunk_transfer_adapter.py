@@ -12,7 +12,7 @@ from pytest_mock import MockerFixture
 from vllm.v1.core.sched.scheduler import Scheduler as VLLMScheduler
 from vllm.v1.request import RequestStatus
 
-from vllm_omni.data_entry_keys import OmniPayload
+from vllm_omni.data_entry_keys import MetaStruct, OmniPayload, OmniPayloadStruct
 from vllm_omni.distributed.omni_connectors.transfer_adapter.base import OmniTransferAdapterBase
 from vllm_omni.distributed.omni_connectors.transfer_adapter.chunk_transfer_adapter import (
     OmniChunkTransferAdapter,
@@ -144,7 +144,9 @@ def test_send_single_request_cleans_up_after_finished_payload(build_adapter, mon
     adapter, _ = build_adapter(stage_id=1)
     request = _req("req-finished", RequestStatus.FINISHED_STOPPED, external_req_id="ext-finished")
 
-    adapter.custom_process_next_stage_input_func = lambda **kwargs: {"x": [1], "finished": True}
+    adapter.custom_process_next_stage_input_func = lambda **kwargs: OmniPayloadStruct(
+        meta=MetaStruct(finished=torch.tensor(True, dtype=torch.bool))
+    )
     cleanup_calls = []
     monkeypatch.setattr(adapter, "cleanup", lambda *a, **kw: cleanup_calls.append((a, kw)))
 

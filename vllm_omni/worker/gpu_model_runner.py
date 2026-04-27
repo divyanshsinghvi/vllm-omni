@@ -327,13 +327,6 @@ class OmniGPUModelRunner(GPUModelRunner):
             # num_computed_tokens > 0 means that we have a hit in prefix
             # caching; mark it so that we can manage the hidden states
             # later on as needed.
-            # DEBUG: PCDIAG
-            logger.warning(
-                "[PCDIAG] new_req=%s num_computed=%s prefix_cache_active=%s",
-                req_id,
-                getattr(new_req_data, "num_computed_tokens", None),
-                self.omni_prefix_cache is not None,
-            )
             if self.omni_prefix_cache is not None and new_req_data.num_computed_tokens > 0:
                 self.omni_prefix_cache.add_prefix_cached_new_req_id(req_id)
 

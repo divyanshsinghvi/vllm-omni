@@ -903,20 +903,6 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
 
                     for mm_key in combined_multimodal_outputs.keys():
                         mm_payload[mm_key] = _unwrap_lists(combined_multimodal_outputs[mm_key][rid])
-                    # DEBUG: PCDIAG
-                    logger.warning(
-                        "[PCDIAG] cache-hit pooler req=%s keys=%s shapes=%s",
-                        rid,
-                        sorted(combined_multimodal_outputs.keys()),
-                        {
-                            k: (
-                                list(mm_payload[k].shape)
-                                if hasattr(mm_payload[k], "shape")
-                                else type(mm_payload[k]).__name__
-                            )
-                            for k in mm_payload
-                        },
-                    )
 
                 else:
                     # Prefix cache disabled; we still need to process the data

@@ -231,7 +231,7 @@ def test_forward_uses_non_stream_decode_without_chunk_metadata():
                 "speech_feat": torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
                 "embedding": torch.tensor([[0.5, 0.6]], dtype=torch.float32),
             },
-            "prefix_ids": [101, 102],
+            "ids": {"prompt": [101, 102]},
             "generated_len": 3,
         }
     ]

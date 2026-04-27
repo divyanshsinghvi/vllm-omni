@@ -8,9 +8,7 @@ from vllm.inputs import TextPrompt
 from vllm_omni.data_entry_keys import (
     CodesStruct,
     MetaStruct,
-    OmniPayload,
     OmniPayloadStruct,
-    to_dict,
 )
 from vllm_omni.inputs.data import OmniTokensPrompt
 
@@ -95,12 +93,10 @@ def latent2vae(
     return vae_inputs
 
 
-def _eof_payload() -> OmniPayload:
-    return to_dict(
-        OmniPayloadStruct(
-            codes=CodesStruct(audio=torch.empty(0, dtype=torch.long)),
-            meta=MetaStruct(finished=torch.tensor(True, dtype=torch.bool)),
-        )
+def _eof_payload() -> OmniPayloadStruct:
+    return OmniPayloadStruct(
+        codes=CodesStruct(audio=torch.empty(0, dtype=torch.long)),
+        meta=MetaStruct(finished=torch.tensor(True, dtype=torch.bool)),
     )
 
 
@@ -109,7 +105,7 @@ def latent2vae_async_chunk(
     pooling_output: dict[str, Any] | None,
     request: Any,
     is_finished: bool = False,
-) -> OmniPayload | None:
+) -> OmniPayloadStruct | None:
     """Stage-0 latent → stage-1 VAE under ``async_chunk`` (connector payload)."""
     # Kept for callback signature compatibility with OmniChunkTransferAdapter.
     _ = transfer_manager
@@ -127,9 +123,7 @@ def latent2vae_async_chunk(
         return _eof_payload() if finished_request else None
 
     serialized_codes = _serialize_latent_to_codes(latent)
-    return to_dict(
-        OmniPayloadStruct(
-            codes=CodesStruct(audio=torch.tensor(serialized_codes, dtype=torch.long)),
-            meta=MetaStruct(finished=torch.tensor(finished_request, dtype=torch.bool)),
-        )
+    return OmniPayloadStruct(
+        codes=CodesStruct(audio=torch.tensor(serialized_codes, dtype=torch.long)),
+        meta=MetaStruct(finished=torch.tensor(finished_request, dtype=torch.bool)),
     )

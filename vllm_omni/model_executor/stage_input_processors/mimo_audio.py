@@ -9,7 +9,6 @@ from vllm_omni.data_entry_keys import (
     MetaStruct,
     OmniPayload,
     OmniPayloadStruct,
-    to_dict,
 )
 from vllm_omni.inputs.data import OmniTokensPrompt
 from vllm_omni.model_executor.models.mimo_audio.config_mimo_audio import TALKER_CODEC_PAD_TOKEN_ID
@@ -60,13 +59,11 @@ def prepend_and_flatten_colmajor(x: torch.Tensor, pad_vec: torch.Tensor) -> torc
     return y_col_major
 
 
-def _make_finished_sentinel() -> dict[str, Any]:
+def _make_finished_sentinel() -> OmniPayloadStruct:
     """Return a minimal payload with finished=True so Stage-1 can end the request."""
-    return to_dict(
-        OmniPayloadStruct(
-            codes=CodesStruct(audio=torch.empty(0, dtype=torch.long)),
-            meta=MetaStruct(finished=torch.tensor(True, dtype=torch.bool)),
-        )
+    return OmniPayloadStruct(
+        codes=CodesStruct(audio=torch.empty(0, dtype=torch.long)),
+        meta=MetaStruct(finished=torch.tensor(True, dtype=torch.bool)),
     )
 
 
@@ -75,7 +72,7 @@ def _flush_remaining_codes(
     request_id: str,
     chunk_size: int,
     left_context_size: int,
-) -> dict[str, Any]:
+) -> OmniPayloadStruct:
     """Flush any accumulated but unsent codes when the request finishes."""
     accumulated = transfer_manager.code_prompt_token_ids.get(request_id, [])
     if not accumulated:
@@ -90,17 +87,15 @@ def _flush_remaining_codes(
     left_ctx_frames = max(0, min(length - context_length, left_context_size))
     flat_codes = torch.tensor(accumulated[-end_index:]).reshape(-1)
 
-    return to_dict(
-        OmniPayloadStruct(
-            codes=CodesStruct(audio=flat_codes),
-            meta=MetaStruct(
-                left_context_size=left_ctx_frames,
-                codec_chunk_frames=chunk_size,
-                codec_left_context_frames=left_context_size,
-                code_flat_numel=int(flat_codes.numel()),
-                finished=torch.tensor(True, dtype=torch.bool),
-            ),
-        )
+    return OmniPayloadStruct(
+        codes=CodesStruct(audio=flat_codes),
+        meta=MetaStruct(
+            left_context_size=left_ctx_frames,
+            codec_chunk_frames=chunk_size,
+            codec_left_context_frames=left_context_size,
+            code_flat_numel=int(flat_codes.numel()),
+            finished=torch.tensor(True, dtype=torch.bool),
+        ),
     )
 
 
@@ -131,7 +126,7 @@ def llm2code2wav_async_chunk(
     pooling_output: OmniPayload,
     request: Any,
     is_finished: bool = False,
-) -> OmniPayload | None:
+) -> OmniPayloadStruct | None:
     """
     Async chunk version: convert stage-0 pooling_output to code2wav payload (pooling / connector accumulation).
 
@@ -181,17 +176,15 @@ def llm2code2wav_async_chunk(
     left_ctx_frames = max(0, min(length - context_length, left_context_size))
     flat_codes = torch.tensor(transfer_manager.code_prompt_token_ids[request_id][-end_index:]).reshape(-1).tolist()
 
-    return to_dict(
-        OmniPayloadStruct(
-            codes=CodesStruct(audio=torch.tensor(flat_codes)),
-            meta=MetaStruct(
-                left_context_size=left_ctx_frames,
-                codec_chunk_frames=chunk_size,
-                codec_left_context_frames=left_context_size,
-                code_flat_numel=len(flat_codes),
-                finished=torch.tensor(is_finished, dtype=torch.bool),
-            ),
-        )
+    return OmniPayloadStruct(
+        codes=CodesStruct(audio=torch.tensor(flat_codes)),
+        meta=MetaStruct(
+            left_context_size=left_ctx_frames,
+            codec_chunk_frames=chunk_size,
+            codec_left_context_frames=left_context_size,
+            code_flat_numel=len(flat_codes),
+            finished=torch.tensor(is_finished, dtype=torch.bool),
+        ),
     )
 
 

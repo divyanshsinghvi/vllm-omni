@@ -141,7 +141,7 @@ def talker2code2wav_async_chunk(
     pooling_output: OmniPayload | None,
     request: Any,
     is_finished: bool = False,
-) -> OmniPayload | None:
+) -> OmniPayloadStruct | None:
     request_id = request.external_req_id
     finished = bool(is_finished or request.is_finished())
     request_payload = getattr(transfer_manager, "request_payload", None)
@@ -212,10 +212,10 @@ def talker2code2wav_async_chunk(
 
     if length <= 0:
         if finished:
-            return {
-                "codes": {"audio": []},
-                "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
-            }
+            return OmniPayloadStruct(
+                codes=CodesStruct(audio=torch.empty(0, dtype=torch.long)),
+                meta=MetaStruct(finished=torch.tensor(True, dtype=torch.bool)),
+            )
         return None
 
     in_initial_phase = initial_chunk_size > 0 and initial_chunk_size < chunk_size and length <= chunk_size
@@ -262,7 +262,7 @@ def talker2code2wav_async_chunk(
         dtype=torch.long,
     )
 
-    payload = OmniPayloadStruct(
+    return OmniPayloadStruct(
         codes=CodesStruct(audio=code_predictor_codes),
         meta=MetaStruct(
             left_context_size=left_context_size,
@@ -271,4 +271,3 @@ def talker2code2wav_async_chunk(
         speaker=extract_speaker_from_request(request),
         language=extract_language_from_request(request),
     )
-    return to_dict(payload)

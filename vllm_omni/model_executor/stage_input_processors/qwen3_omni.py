@@ -299,7 +299,7 @@ def thinker2talker_async_chunk(
     pooling_output: OmniPayload,
     request: OmniEngineCoreRequest,
     is_finished: bool = False,
-) -> OmniPayload | None:
+) -> OmniPayloadStruct | None:
     """
     Process thinker outputs to create talker inputs.
     1. thinker's text generation outputs (token IDs + hidden states)
@@ -364,7 +364,7 @@ def thinker2talker_async_chunk(
                 speaker=speaker,
                 language=language,
             )
-    return to_dict(payload)
+    return payload
 
 
 def thinker2talker(
@@ -485,7 +485,7 @@ def talker2code2wav_async_chunk(
     pooling_output: OmniPayload,
     request: OmniEngineCoreRequest,
     is_finished: bool = False,
-) -> OmniPayload | None:
+) -> OmniPayloadStruct | None:
     """
     Pooling version.
     """
@@ -536,14 +536,12 @@ def talker2code2wav_async_chunk(
 
     codes = torch.tensor(transfer_manager.code_prompt_token_ids[request_id][-end_index:]).transpose(0, 1).reshape(-1)
 
-    return to_dict(
-        OmniPayloadStruct(
-            codes=CodesStruct(audio=codes),
-            meta=MetaStruct(
-                left_context_size=left_context_size,
-                finished=torch.tensor(is_finished, dtype=torch.bool),
-            ),
-        )
+    return OmniPayloadStruct(
+        codes=CodesStruct(audio=codes),
+        meta=MetaStruct(
+            left_context_size=left_context_size,
+            finished=torch.tensor(is_finished, dtype=torch.bool),
+        ),
     )
 
 

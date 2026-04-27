@@ -9,7 +9,6 @@ from vllm_omni.data_entry_keys import (
     MetaStruct,
     OmniPayload,
     OmniPayloadStruct,
-    to_dict,
 )
 from vllm_omni.inputs.data import OmniTokensPrompt
 
@@ -58,7 +57,7 @@ def generator2tokenizer_async_chunk(
     pooling_output: OmniPayload,
     request: Any,
     is_finished: bool = False,
-) -> OmniPayload | None:
+) -> OmniPayloadStruct | None:
     request_id = request.external_req_id
     finished = bool(is_finished or request.is_finished())
 
@@ -88,11 +87,9 @@ def generator2tokenizer_async_chunk(
     # finished and nothing was produced, emit an EOF marker.
     if length <= 0:
         if finished:
-            return to_dict(
-                OmniPayloadStruct(
-                    codes=CodesStruct(audio=torch.empty(0, dtype=torch.long)),
-                    meta=MetaStruct(finished=torch.tensor(True, dtype=torch.bool)),
-                )
+            return OmniPayloadStruct(
+                codes=CodesStruct(audio=torch.empty(0, dtype=torch.long)),
+                meta=MetaStruct(finished=torch.tensor(True, dtype=torch.bool)),
             )
         return None
 
@@ -113,14 +110,12 @@ def generator2tokenizer_async_chunk(
     # Pack context + chunk into codebook-major flat codes for adapter.
     code_predictor_codes = torch.tensor(window_frames).reshape(-1).tolist()
 
-    return to_dict(
-        OmniPayloadStruct(
-            codes=CodesStruct(
-                audio=torch.tensor(
-                    [int(ctx_frames), int(context_length)] + code_predictor_codes,
-                    dtype=torch.long,
-                ),
+    return OmniPayloadStruct(
+        codes=CodesStruct(
+            audio=torch.tensor(
+                [int(ctx_frames), int(context_length)] + code_predictor_codes,
+                dtype=torch.long,
             ),
-            meta=MetaStruct(finished=torch.tensor(finished, dtype=torch.bool)),
-        )
+        ),
+        meta=MetaStruct(finished=torch.tensor(finished, dtype=torch.bool)),
     )

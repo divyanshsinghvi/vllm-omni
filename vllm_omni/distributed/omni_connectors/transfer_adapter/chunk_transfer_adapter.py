@@ -249,7 +249,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
             except Exception as e:
                 logger.error(f"Failed to use custom_process_input_func for payload extraction: {e}")
 
-        if not payload_data:
+        if payload_data is None:
             return
 
         success, size, metadata = self.connector.put(
@@ -262,7 +262,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         if success:
             self.put_req_chunk[external_req_id] += 1
             logger.debug(f"[Stage-{stage_id}] Sent {connector_put_key}")
-            finished_flag = payload_data.get("meta", {}).get("finished", payload_data.get("finished"))
+            finished_flag = payload_data.meta.finished if payload_data.meta is not None else None
             is_payload_finished = False
             if isinstance(finished_flag, torch.Tensor):
                 is_payload_finished = finished_flag.numel() == 1 and bool(finished_flag.item())

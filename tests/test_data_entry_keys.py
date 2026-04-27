@@ -166,6 +166,66 @@ class TestNativeMsgspecEncoding:
             decode_payload(wire)
 
 
+class TestWireEquivalenceStructVsDict:
+    """Producer return-side migration invariant: encoding an ``OmniPayloadStruct``
+    via the connector serializer must decode to the same payload as encoding
+    the equivalent ``to_dict(struct)``.
+
+    Guards against regressions where the wire format diverges between the two
+    paths (e.g. msgspec adds a struct tag, or ``to_dict`` drops a non-default
+    sub-field that ``omit_defaults`` retains).
+    """
+
+    @staticmethod
+    def _round_trip(obj):
+        from vllm_omni.distributed.omni_connectors.utils.serialization import (
+            OmniMsgpackDecoder,
+            OmniMsgpackEncoder,
+        )
+
+        return OmniMsgpackDecoder().decode(OmniMsgpackEncoder().encode(obj))
+
+    @staticmethod
+    def _assert_decoded_equal(a, b):
+        if isinstance(a, dict):
+            assert isinstance(b, dict)
+            assert sorted(a.keys()) == sorted(b.keys())
+            for k in a:
+                TestWireEquivalenceStructVsDict._assert_decoded_equal(a[k], b[k])
+        elif isinstance(a, torch.Tensor):
+            assert isinstance(b, torch.Tensor)
+            assert a.dtype == b.dtype
+            assert a.shape == b.shape
+            assert torch.equal(a, b)
+        elif isinstance(a, list):
+            assert isinstance(b, list) and len(a) == len(b)
+            for x, y in zip(a, b, strict=True):
+                TestWireEquivalenceStructVsDict._assert_decoded_equal(x, y)
+        else:
+            assert a == b
+
+    def test_basic_payload(self):
+        struct = OmniPayloadStruct(
+            codes=CodesStruct(audio=torch.tensor([1, 2, 3], dtype=torch.long)),
+            meta=MetaStruct(left_context_size=10, finished=torch.tensor(True, dtype=torch.bool)),
+        )
+        self._assert_decoded_equal(self._round_trip(struct), self._round_trip(to_dict(struct)))
+
+    def test_nested_sub_structs(self):
+        # Exercises depth-2 sub-struct encoding (embed.*) which was the case that
+        # exposed schema drift in the #1829 migration.
+        struct = OmniPayloadStruct(
+            codes=CodesStruct(audio=torch.tensor([5, 6], dtype=torch.long)),
+            meta=MetaStruct(finished=torch.tensor(False, dtype=torch.bool)),
+            embed=EmbeddingsStruct(
+                speech_token=torch.tensor([[1, 2, 3]]),
+                speech_feat=torch.tensor([[[0.1, 0.2], [0.3, 0.4]]]),
+                embedding=torch.tensor([[0.5, 0.6]]),
+            ),
+        )
+        self._assert_decoded_equal(self._round_trip(struct), self._round_trip(to_dict(struct)))
+
+
 class TestFlattenPayload:
     def test_basic_nested_to_dotted(self):
         nested = {

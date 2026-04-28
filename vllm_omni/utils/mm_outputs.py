@@ -47,7 +47,7 @@ def _to_cpu(value):
         return out or None
     if isinstance(value, list):
         if not value:
-            return None
+            return value
         return [_to_cpu(v) for v in value]
     return value
 

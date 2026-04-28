@@ -136,6 +136,15 @@ def parse_args():
     parser.add_argument("--fps", type=int, default=15)
     parser.add_argument("--output", type=str, default="micro_world_t2w_output.mp4")
     parser.add_argument(
+        "--draw-hud",
+        action="store_true",
+        help=(
+            "Overlay the keyboard (W/A/S/D/Space/Shift/Ctrl) + mouse cursor HUD "
+            "onto every output frame, mirroring the reference Micro-World "
+            "`with_ui=True` post-processing. Requires opencv-python."
+        ),
+    )
+    parser.add_argument(
         "--stage-init-timeout",
         type=int,
         default=3000,
@@ -214,6 +223,12 @@ def main():
         video = frames[0] if frames.ndim == 5 else frames
     else:
         video = frames
+
+    if args.draw_hud:
+        from _hud import draw_hud
+
+        # ``video`` is (num_frames, H, W, 3) at this point.
+        video = draw_hud(np.asarray(video), mouse_actions, keyboard_actions)
 
     export_to_video(video, str(output_path), fps=args.fps)
     print(f"Saved to {output_path}")

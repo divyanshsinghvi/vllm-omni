@@ -369,16 +369,26 @@ class OmniConnectorModelRunnerMixin:
     def _extract_scheduling_metadata(cls, payload: OmniPayload) -> dict[str, Any]:
         """Extract only the fields the scheduler needs from a full payload."""
         extracted: dict[str, Any] = {}
-        if "next_stage_prompt_len" in payload:
+        meta = payload.get("meta") if isinstance(payload, dict) else None
+        meta = meta if isinstance(meta, dict) else {}
+
+        if "next_stage_prompt_len" in meta:
+            extracted["next_stage_prompt_len"] = meta["next_stage_prompt_len"]
+        elif "next_stage_prompt_len" in payload:
+            logger.warning_once(
+                "legacy flat 'next_stage_prompt_len' key in payload; expected 'meta.next_stage_prompt_len'"
+            )
             extracted["next_stage_prompt_len"] = payload["next_stage_prompt_len"]
+
         audio_codes = cls._payload_audio_codes(payload)
         if audio_codes is not None:
             extracted["code_predictor_codes"] = audio_codes
-        meta = payload.get("meta")
-        if isinstance(meta, dict) and "left_context_size" in meta:
+
+        if "left_context_size" in meta:
             extracted["left_context_size"] = meta["left_context_size"]
         elif "left_context_size" in payload:
             logger.warning_once("legacy flat 'left_context_size' key in payload; expected 'meta.left_context_size'")
+
         return extracted
 
     _NON_CONSUMABLE_PAYLOAD_KEYS = {

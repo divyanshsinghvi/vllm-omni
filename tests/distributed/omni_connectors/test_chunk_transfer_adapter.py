@@ -12,7 +12,7 @@ from pytest_mock import MockerFixture
 from vllm.v1.core.sched.scheduler import Scheduler as VLLMScheduler
 from vllm.v1.request import RequestStatus
 
-from vllm_omni.data_entry_keys import MetaStruct, OmniPayload, OmniPayloadStruct
+from vllm_omni.data_entry_keys import CodesStruct, MetaStruct, OmniPayload, OmniPayloadStruct
 from vllm_omni.distributed.omni_connectors.transfer_adapter.base import OmniTransferAdapterBase
 from vllm_omni.distributed.omni_connectors.transfer_adapter.chunk_transfer_adapter import (
     OmniChunkTransferAdapter,
@@ -138,6 +138,47 @@ def test_save_async(build_adapter):
 
     task = adapter._pending_save_reqs.popleft()
     assert task["is_finished"] is False
+
+
+def test_send_single_request_struct_without_meta_does_not_crash(build_adapter, monkeypatch):
+    """Producer may return a struct with ``meta=None`` (e.g. payload that
+    carries only ``embed`` or ``codes``). The sender's ``meta is not None``
+    guard handles this without AttributeError; ``finished_flag`` is None and
+    the cleanup path is not triggered.
+    """
+    adapter, _ = build_adapter(stage_id=1)
+    request = _req("req-no-meta", RequestStatus.WAITING, external_req_id="ext-no-meta")
+
+    adapter.custom_process_next_stage_input_func = lambda **kwargs: OmniPayloadStruct(
+        codes=CodesStruct(audio=torch.tensor([1, 2], dtype=torch.long)),
+    )
+    cleanup_calls = []
+    monkeypatch.setattr(adapter, "cleanup", lambda *a, **kw: cleanup_calls.append((a, kw)))
+
+    adapter._send_single_request({"pooling_output": None, "request": request, "is_finished": False})
+
+    assert cleanup_calls == []  # no terminal cleanup; meta.finished is unobservable
+
+
+def test_send_single_request_empty_struct_goes_on_wire(build_adapter, monkeypatch):
+    """Pin the contract: an explicitly empty ``OmniPayloadStruct()`` passes
+    the ``payload_data is None`` check and gets sent. To skip a chunk, the
+    producer must return ``None``, not an empty struct. (Filtering empty
+    structs at the adapter would require introspecting all struct fields on
+    every send and was rejected for cost vs. value.)
+    """
+    adapter, connector = build_adapter(stage_id=1)
+    request = _req("req-empty", RequestStatus.WAITING, external_req_id="ext-empty")
+
+    adapter.custom_process_next_stage_input_func = lambda **kwargs: OmniPayloadStruct()
+    monkeypatch.setattr(adapter, "cleanup", lambda *a, **kw: None)
+
+    adapter._send_single_request({"pooling_output": None, "request": request, "is_finished": False})
+
+    assert connector.put.called
+    sent_payload = connector.put.call_args.kwargs["data"]
+    assert isinstance(sent_payload, OmniPayloadStruct)
+    assert sent_payload.meta is None  # confirms it's the empty struct on the wire
 
 
 def test_send_single_request_cleans_up_after_finished_payload(build_adapter, monkeypatch):

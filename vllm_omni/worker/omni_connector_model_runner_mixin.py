@@ -27,14 +27,13 @@ from vllm.logger import init_logger
 from vllm_omni.data_entry_keys import OmniPayload
 from vllm_omni.distributed.omni_connectors.factory import OmniConnectorFactory
 from vllm_omni.distributed.omni_connectors.utils.config import ConnectorSpec
+from vllm_omni.distributed.omni_connectors.utils.payload_merge import merge_chunk_payloads
 from vllm_omni.outputs import OmniConnectorOutput
 from vllm_omni.worker.payload_span import (
     THINKER_DECODE_EMBEDDINGS_KEY,
     THINKER_DECODE_TOKEN_END_KEY,
     THINKER_DECODE_TOKEN_START_KEY,
     THINKER_OUTPUT_TOKEN_IDS_KEY,
-    get_tensor_span,
-    merge_tensor_spans,
 )
 
 if TYPE_CHECKING:
@@ -1795,82 +1794,18 @@ class OmniConnectorModelRunnerMixin:
     def _accumulate_payload(self, req_id: str, payload_data: OmniPayload) -> OmniPayload:
         """Accumulate chunk payloads (concat tensors, extend lists).
 
-        Returns a **shallow copy** of the accumulated state so callers
-        (e.g. ``_poll_single_request``) can store it in
-        ``_local_stage_payload_cache`` without aliasing the authoritative
-        ``_send_side_request_payload`` dict.
+        Delegates to ``merge_chunk_payloads`` for depth-2 merge semantics so
+        this accumulator agrees with
+        ``OmniChunkTransferAdapter._update_request_payload``. Returns a
+        shallow copy so callers (e.g. ``_poll_single_request``) can stash it
+        in ``_local_stage_payload_cache`` without aliasing the authoritative
+        ``_send_side_request_payload`` entry.
         """
         if req_id not in self._send_side_request_payload:
             self._send_side_request_payload[req_id] = dict(payload_data)
             return dict(self._send_side_request_payload[req_id])
 
-        origin = self._send_side_request_payload[req_id]
-        merged = dict(origin)
-        override_keys = payload_data.get("override_keys", ())
-        drop_decode_span = False
-        decode_span_handled = False
-        for key, value in payload_data.items():
-            if key == "finished":
-                merged[key] = value
-                continue
-            if key == THINKER_DECODE_EMBEDDINGS_KEY:
-                merged_span = merge_tensor_spans(
-                    get_tensor_span(
-                        origin,
-                        tensor_key=THINKER_DECODE_EMBEDDINGS_KEY,
-                        start_key=THINKER_DECODE_TOKEN_START_KEY,
-                        end_key=THINKER_DECODE_TOKEN_END_KEY,
-                    ),
-                    get_tensor_span(
-                        payload_data,
-                        tensor_key=THINKER_DECODE_EMBEDDINGS_KEY,
-                        start_key=THINKER_DECODE_TOKEN_START_KEY,
-                        end_key=THINKER_DECODE_TOKEN_END_KEY,
-                    ),
-                )
-                if merged_span is not None:
-                    merged[key], merged[THINKER_DECODE_TOKEN_START_KEY], merged[THINKER_DECODE_TOKEN_END_KEY] = (
-                        merged_span
-                    )
-                    decode_span_handled = True
-                    continue
-                if isinstance(value, torch.Tensor) and key in origin:
-                    if (
-                        THINKER_DECODE_TOKEN_START_KEY in origin
-                        or THINKER_DECODE_TOKEN_END_KEY in origin
-                        or THINKER_DECODE_TOKEN_START_KEY in payload_data
-                        or THINKER_DECODE_TOKEN_END_KEY in payload_data
-                    ):
-                        logger.warning(
-                            "[Stage-%s] req=%s falling back to legacy thinker decode "
-                            "merge due to missing/invalid/non-contiguous span "
-                            "metadata",
-                            self._stage_id,
-                            req_id,
-                        )
-                        drop_decode_span = True
-                    merged[key] = torch.cat([origin[key], value], dim=0)
-                    continue
-                merged[key] = value
-                continue
-            if key in {THINKER_DECODE_TOKEN_START_KEY, THINKER_DECODE_TOKEN_END_KEY}:
-                if decode_span_handled or drop_decode_span:
-                    continue
-                merged[key] = value
-                continue
-            if key in override_keys:
-                merged[key] = value
-                continue
-            if isinstance(value, torch.Tensor) and key in origin:
-                merged[key] = torch.cat([origin[key], value], dim=0)
-            elif isinstance(value, list) and key in origin:
-                merged[key] = origin[key] + value
-            else:
-                merged[key] = value
-
-        if drop_decode_span:
-            merged.pop(THINKER_DECODE_TOKEN_START_KEY, None)
-            merged.pop(THINKER_DECODE_TOKEN_END_KEY, None)
+        merged = merge_chunk_payloads(self._send_side_request_payload[req_id], payload_data)
         self._send_side_request_payload[req_id] = merged
         return dict(merged)
 

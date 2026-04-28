@@ -14,6 +14,7 @@ from vllm_omni.data_entry_keys import OmniPayloadStruct, unflatten_payload
 from ..factory import OmniConnectorFactory
 from ..utils.config import ConnectorSpec
 from ..utils.logging import get_connector_logger
+from ..utils.payload_merge import merge_chunk_payloads
 from .base import OmniTransferAdapterBase
 
 logger = get_connector_logger(__name__)
@@ -199,32 +200,18 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         return False
 
     def _update_request_payload(self, req_id: str, payload_data: dict[str, Any]) -> dict[str, Any]:
-        """Update the stored payload for *req_id* with the latest chunk."""
+        """Update the stored payload for *req_id* with the latest chunk.
+
+        Delegates to ``merge_chunk_payloads`` for depth-2 merge semantics so
+        the chunk-adapter accumulator agrees with
+        ``OmniConnectorModelRunnerMixin._accumulate_payload``.
+        """
         if req_id not in self.request_payload:
             self.request_payload[req_id] = payload_data
             return payload_data
-        origin = self.request_payload[req_id]
-        raw_ok = payload_data.get("meta", {}).pop("override_keys", [])
-        override_keys = {tuple(k) if isinstance(k, list) else k for k in raw_ok}
-
-        for type_key, new_val in payload_data.items():
-            if not isinstance(new_val, dict):
-                continue
-            origin_sub = origin.get(type_key)
-            if not isinstance(origin_sub, dict):
-                continue
-            for qual, value in new_val.items():
-                if type_key == "meta" and qual == "finished":
-                    continue
-                if (type_key, qual) in override_keys:
-                    continue
-                if isinstance(value, torch.Tensor) and qual in origin_sub:
-                    new_val[qual] = torch.cat([origin_sub[qual], value], dim=0)
-                elif isinstance(value, list) and qual in origin_sub:
-                    new_val[qual] = origin_sub[qual] + value
-
-        self.request_payload[req_id] = payload_data
-        return payload_data
+        merged = merge_chunk_payloads(self.request_payload[req_id], payload_data)
+        self.request_payload[req_id] = merged
+        return merged
 
     def _send_single_request(self, task: dict):
         raw_po = task["pooling_output"]

@@ -113,7 +113,15 @@ class EmbeddingsStruct(_StructBase):
     prefill: torch.Tensor | None = None
     prefill_shape: list[int] | None = None
     decode: torch.Tensor | None = None
+    # Token-position span for `decode`: half-open [start, end).
+    # Producers may set these per-chunk to enable span-aware merge across
+    # chunks (see merge_chunk_payloads). When absent, the accumulator falls
+    # back to naive tensor concat.
+    decode_token_start: int | None = None
+    decode_token_end: int | None = None
     cached_decode: torch.Tensor | None = None
+    cached_decode_token_start: int | None = None
+    cached_decode_token_end: int | None = None
     tts_bos: torch.Tensor | None = None
     tts_eos: torch.Tensor | None = None
     tts_pad: torch.Tensor | None = None

@@ -27,14 +27,13 @@ from vllm.logger import init_logger
 from vllm_omni.data_entry_keys import OmniPayload
 from vllm_omni.distributed.omni_connectors.factory import OmniConnectorFactory
 from vllm_omni.distributed.omni_connectors.utils.config import ConnectorSpec
-from vllm_omni.distributed.omni_connectors.utils.payload_merge import merge_chunk_payloads
 from vllm_omni.outputs import OmniConnectorOutput
 from vllm_omni.worker.payload_span import (
-    THINKER_DECODE_EMBEDDINGS_KEY,
-    THINKER_DECODE_TOKEN_END_KEY,
-    THINKER_DECODE_TOKEN_START_KEY,
-    THINKER_OUTPUT_TOKEN_IDS_KEY,
+    get_tensor_span,
+    merge_tensor_spans,
 )
+
+_EMBED_SPAN_GROUPS: tuple[tuple[str, str, str], ...] = (("decode", "decode_token_start", "decode_token_end"),)
 
 if TYPE_CHECKING:
     from vllm_omni.distributed.omni_connectors.connectors.base import (
@@ -391,14 +390,14 @@ class OmniConnectorModelRunnerMixin:
 
         return extracted
 
-    _NON_CONSUMABLE_PAYLOAD_KEYS = {
-        "finished",
-        "override_keys",
-        "next_stage_prompt_len",
-        "left_context_size",
-        THINKER_OUTPUT_TOKEN_IDS_KEY,
-        THINKER_DECODE_TOKEN_START_KEY,
-        THINKER_DECODE_TOKEN_END_KEY,
+    _NON_CONSUMABLE_PAYLOAD_KEYS: set[tuple[str, str]] = {
+        ("meta", "finished"),
+        ("meta", "override_keys"),
+        ("meta", "next_stage_prompt_len"),
+        ("meta", "left_context_size"),
+        ("ids", "output"),
+        ("embed", "decode_token_start"),
+        ("embed", "decode_token_end"),
     }
 
     @staticmethod
@@ -448,23 +447,29 @@ class OmniConnectorModelRunnerMixin:
         if not isinstance(payload, dict) or not payload:
             return False
 
-        decode_embeddings = payload.get(THINKER_DECODE_EMBEDDINGS_KEY)
-        if isinstance(decode_embeddings, torch.Tensor):
-            if decode_embeddings.ndim == 0:
-                return True
-            return decode_embeddings.numel() > 0 and decode_embeddings.shape[0] > 0
+        embed = payload.get("embed")
+        if isinstance(embed, dict):
+            decode_embeddings = embed.get("decode")
+            if isinstance(decode_embeddings, torch.Tensor):
+                if decode_embeddings.ndim == 0:
+                    return True
+                return decode_embeddings.numel() > 0 and decode_embeddings.shape[0] > 0
 
         audio_codes = cls._payload_audio_codes(payload)
         if audio_codes is not None:
             if isinstance(audio_codes, torch.Tensor):
                 return audio_codes.numel() > 0
-            # Codec code 0 is valid; non-empty code payloads are consumable.
             if hasattr(audio_codes, "__len__"):
                 return len(audio_codes) > 0
             return True
 
         for key, value in payload.items():
-            if key in cls._NON_CONSUMABLE_PAYLOAD_KEYS:
+            if isinstance(value, dict):
+                for sk, sv in value.items():
+                    if (key, sk) in cls._NON_CONSUMABLE_PAYLOAD_KEYS:
+                        continue
+                    if cls._payload_value_has_content(sv):
+                        return True
                 continue
             if cls._payload_value_has_content(value):
                 return True
@@ -1802,20 +1807,65 @@ class OmniConnectorModelRunnerMixin:
     # ------------------------------------------------------------------ #
 
     def _accumulate_payload(self, req_id: str, payload_data: OmniPayload) -> OmniPayload:
-        """Accumulate chunk payloads (concat tensors, extend lists).
-
-        Delegates to ``merge_chunk_payloads`` for depth-2 merge semantics so
-        this accumulator agrees with
-        ``OmniChunkTransferAdapter._update_request_payload``. Returns a
-        shallow copy so callers (e.g. ``_poll_single_request``) can stash it
-        in ``_local_stage_payload_cache`` without aliasing the authoritative
-        ``_send_side_request_payload`` entry.
-        """
+        """Accumulate chunk payloads (concat tensors, extend lists)."""
         if req_id not in self._send_side_request_payload:
             self._send_side_request_payload[req_id] = dict(payload_data)
             return dict(self._send_side_request_payload[req_id])
 
-        merged = merge_chunk_payloads(self._send_side_request_payload[req_id], payload_data)
+        origin = self._send_side_request_payload[req_id]
+        merged = dict(origin)
+        raw_ok = payload_data.get("meta", {}).get("override_keys", []) if isinstance(payload_data, dict) else []
+        override_keys = {tuple(k) if isinstance(k, list) else k for k in raw_ok}
+
+        for key, value in payload_data.items():
+            if isinstance(value, dict):
+                origin_sub = origin.get(key)
+                merged_sub = dict(origin_sub) if isinstance(origin_sub, dict) else {}
+                span_handled: set[str] = set()
+                if key == "embed" and isinstance(origin_sub, dict):
+                    for tk, sk, ek in _EMBED_SPAN_GROUPS:
+                        if tk not in value or (key, tk) in override_keys:
+                            continue
+                        span = merge_tensor_spans(
+                            get_tensor_span(origin_sub, tensor_key=tk, start_key=sk, end_key=ek),
+                            get_tensor_span(value, tensor_key=tk, start_key=sk, end_key=ek),
+                        )
+                        if span is None:
+                            continue
+                        t, s, e = span
+                        merged_sub[tk] = t
+                        merged_sub[sk] = s
+                        merged_sub[ek] = e
+                        span_handled |= {tk, sk, ek}
+                for qual, qval in value.items():
+                    if qual in span_handled:
+                        continue
+                    if key == "meta" and qual == "finished":
+                        merged_sub[qual] = qval
+                        continue
+                    if (key, qual) in override_keys:
+                        merged_sub[qual] = qval
+                        continue
+                    osv = merged_sub.get(qual)
+                    if isinstance(qval, torch.Tensor) and isinstance(osv, torch.Tensor):
+                        merged_sub[qual] = torch.cat([osv, qval], dim=0)
+                    elif isinstance(qval, list) and isinstance(osv, list):
+                        merged_sub[qual] = osv + qval
+                    else:
+                        merged_sub[qual] = qval
+                merged[key] = merged_sub
+            else:
+                if key in override_keys:
+                    merged[key] = value
+                    continue
+                ov = origin.get(key)
+                if isinstance(value, torch.Tensor) and isinstance(ov, torch.Tensor):
+                    merged[key] = torch.cat([ov, value], dim=0)
+                elif isinstance(value, list) and isinstance(ov, list):
+                    merged[key] = ov + value
+                else:
+                    merged[key] = value
+
         self._send_side_request_payload[req_id] = merged
         return dict(merged)
 

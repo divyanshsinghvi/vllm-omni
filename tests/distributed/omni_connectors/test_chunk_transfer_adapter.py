@@ -606,3 +606,42 @@ def test_omni_ar_scheduler_finish_requests(mocker: MockerFixture):
         OmniARScheduler.finish_requests(sched, ["r1"], RequestStatus.FINISHED_ABORTED)
 
     assert order == ["adapter", "super"]
+
+
+def test_wire_round_trip_struct_to_dict_contract():
+    """Pin the wire contract: encoding ``OmniPayloadStruct`` and decoding it
+    yields a dict equivalent to ``to_dict(struct)``.
+
+    The chunk-adapter sender uses struct attribute access while the receiver
+    uses dict-key access. This works only because ``OmniMsgpackDecoder`` has
+    no target type and decodes structs back to plain dicts. If this test
+    breaks, the receiver's dict access will silently drop fields or KeyError.
+    """
+    from vllm_omni.data_entry_keys import CodesStruct, to_dict
+    from vllm_omni.distributed.omni_connectors.utils.serialization import (
+        OmniMsgpackDecoder,
+        OmniMsgpackEncoder,
+    )
+
+    struct = OmniPayloadStruct(
+        meta=MetaStruct(
+            finished=torch.tensor(True, dtype=torch.bool),
+            left_context_size=12,
+        ),
+        codes=CodesStruct(audio=torch.tensor([1, 2, 3], dtype=torch.int64)),
+    )
+
+    encoded = OmniMsgpackEncoder().encode(struct)
+    decoded = OmniMsgpackDecoder().decode(encoded)
+
+    assert isinstance(decoded, dict)
+    assert isinstance(decoded["meta"], dict)
+    assert isinstance(decoded["meta"]["finished"], torch.Tensor)
+    assert bool(decoded["meta"]["finished"].item()) is True
+    assert decoded["meta"]["left_context_size"] == 12
+    assert torch.equal(decoded["codes"]["audio"], torch.tensor([1, 2, 3], dtype=torch.int64))
+
+    expected = to_dict(struct)
+    assert set(decoded.keys()) == set(expected.keys())
+    assert set(decoded["meta"].keys()) == set(expected["meta"].keys())
+    assert set(decoded["codes"].keys()) == set(expected["codes"].keys())

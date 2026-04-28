@@ -778,12 +778,15 @@ class MicroWorldAdaLNTransformer(WanTransformer3DModel):
                 break
 
             if not fused:
+                # ffn renaming: ffn.0 → ffn.net_0.proj, ffn.2 → ffn.net_2
+                # (ffn.0 is a Linear wrapped as GELU-activated FFN's first proj)
                 if ".ffn.0." in lookup_name:
-                    lookup_name = lookup_name.replace(".ffn.0.", ".ffn.net_0.")
+                    lookup_name = lookup_name.replace(".ffn.0.", ".ffn.net_0.proj.")
                 elif ".ffn.2." in lookup_name:
                     lookup_name = lookup_name.replace(".ffn.2.", ".ffn.net_2.")
+                # diffusers-style ffn renaming
                 if ".ffn.net.0." in lookup_name:
-                    lookup_name = lookup_name.replace(".ffn.net.0.", ".ffn.net_0.")
+                    lookup_name = lookup_name.replace(".ffn.net.0.", ".ffn.net_0.proj.")
                 elif ".ffn.net.2." in lookup_name:
                     lookup_name = lookup_name.replace(".ffn.net.2.", ".ffn.net_2.")
                 if ".to_out.0." in lookup_name:

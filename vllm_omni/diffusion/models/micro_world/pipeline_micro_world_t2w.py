@@ -193,6 +193,12 @@ class MicroWorldT2WPipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, Diffu
 
         # Store config for latent shape computation
         self.transformer_config = self.transformer.config
+        # Reference WanActionControlNetModel re-pads prompt embeds to text_len
+        # with zeros before text_embedding, then attends without a key mask.
+        # Cross-attention sees all 512 (projected-zero) "virtual" context tokens,
+        # so we must hand the transformer the same shape — even though the T5
+        # output has been trimmed for compute.
+        self._text_len = int(transformer_config.get("text_len", 512))
 
         # Scheduler
         flow_shift = od_config.flow_shift if od_config.flow_shift is not None else 3.0
@@ -602,6 +608,19 @@ class MicroWorldT2WPipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, Diffu
                 do_classifier_free_guidance=guidance_scale > 1.0,
                 device=device,
                 dtype=dtype,
+            )
+
+        # Re-pad to text_len with zeros so cross-attention sees the same K/V
+        # count as the reference (which projects the padded zeros and attends
+        # over all 512 positions without a key mask). Without this, every
+        # transformer block diverges from reference starting at attn2.
+        import torch.nn.functional as _F
+
+        if prompt_embeds.shape[1] < self._text_len:
+            prompt_embeds = _F.pad(prompt_embeds, (0, 0, 0, self._text_len - prompt_embeds.shape[1]))
+        if negative_prompt_embeds is not None and negative_prompt_embeds.shape[1] < self._text_len:
+            negative_prompt_embeds = _F.pad(
+                negative_prompt_embeds, (0, 0, 0, self._text_len - negative_prompt_embeds.shape[1])
             )
 
         # ---- DEBUG DUMPS ----

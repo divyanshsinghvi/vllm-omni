@@ -13,14 +13,26 @@ Setup
 
     mkdir -p ./Micro-World-T2W-combined
     ln -s $(pwd)/Micro-World-T2W/transformer   ./Micro-World-T2W-combined/transformer
+    ln -s $(pwd)/Micro-World-T2W/lora_diffusion_pytorch_model.safetensors \
+                                               ./Micro-World-T2W-combined/lora_diffusion_pytorch_model.safetensors
     ln -s $(pwd)/Wan2.1-Base/tokenizer         ./Micro-World-T2W-combined/tokenizer
     ln -s $(pwd)/Wan2.1-Base/text_encoder      ./Micro-World-T2W-combined/text_encoder
     ln -s $(pwd)/Wan2.1-Base/vae               ./Micro-World-T2W-combined/vae
 
 Usage
 ─────
-    python text_to_world.py --model ./Micro-World-T2W-combined
-    python text_to_world.py --model ./Micro-World-T2W-combined --actions "strafe_left+look_right"
+    # Reproduce the validated reference run (matches AMD Micro-World example):
+    python text_to_world.py --model ./Micro-World-T2W-combined \
+        --output micro_world_t2w_output.mp4
+
+    # Override prompt/actions/seed:
+    python text_to_world.py --model ./Micro-World-T2W-combined \
+        --prompt "Exploring an ancient jungle ruin in first person perspective." \
+        --actions "strafe_left+look_right" --seed 42
+
+    # Custom action_list (Micro-World reference format):
+    python text_to_world.py --model ./Micro-World-T2W-combined \
+        --action-list '[[20, "1 0 0 0 0 0 0 0 0"], [40, "0 1 0 0 0 0 0 0 5"], "30 60"]'
 """
 
 import argparse
@@ -95,20 +107,26 @@ def parse_args():
     parser = argparse.ArgumentParser(description="AMD Micro-World T2W generation.")
     parser.add_argument("--model", required=True, help="Combined model directory path.")
     parser.add_argument(
-        "--prompt", default="Running along a cliffside path in a tropical island in first person perspective."
+        "--prompt",
+        default=(
+            "Running along a cliffside path in a tropical island in first person perspective, "
+            "with turquoise waters crashing against the rocks far below, the salty scent of the "
+            "ocean carried by the breeze, and the sound of distant waves blending with the calls "
+            "of seagulls as the path twists and turns along the jagged cliffs."
+        ),
     )
     parser.add_argument("--negative-prompt", default="")
     parser.add_argument("--actions", default="walk_forward", help="Action preset (e.g. 'walk_forward+look_right').")
     parser.add_argument("--action-file", default=None, help="JSON file with {mouse_actions, keyboard_actions}.")
     parser.add_argument(
         "--action-list",
-        default=None,
+        default='[[20, "1 0 0 0 0 0 0 0 0"], [40, "0 1 0 0 0 0 0 0 5"], [80, "0 0 0 1 0 0 0 0 -3"], "30 60"]',
         help=(
             "Micro-World reference action_list as JSON string, e.g. "
             '\'[[20, "1 0 0 0 0 0 0 0 0"], [40, "0 1 0 0 0 0 0 0 5"], "30 60"]\''
         ),
     )
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=43)
     parser.add_argument("--height", type=int, default=352)
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--num-frames", type=int, default=81)
@@ -165,6 +183,7 @@ def main():
             num_frames=args.num_frames,
             num_inference_steps=args.num_inference_steps,
             guidance_scale=args.guidance_scale,
+            seed=args.seed,
             generator=generator,
             extra_args={"mouse_actions": mouse_actions, "keyboard_actions": keyboard_actions},
         ),

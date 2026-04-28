@@ -363,7 +363,11 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
             shift = shift.unsqueeze(1)
             scale = scale.unsqueeze(1)
 
-        hidden_states = (self.norm_out(hidden_states.float()) * (1 + scale) + shift).type_as(hidden_states)
+        # ``norm_out`` is the fused ``AdaLayerNorm`` (post #2585): takes
+        # ``(x, scale, shift)`` and computes ``layernorm(x) * (1 + scale) + shift``
+        # internally. Pre-merge this was a plain LayerNorm and the modulation
+        # was applied here; that path is now handled inside the fused op.
+        hidden_states = self.norm_out(hidden_states, scale, shift).type_as(hidden_states)
         hidden_states = self.proj_out(hidden_states)
 
         hidden_states = hidden_states.reshape(
@@ -696,7 +700,11 @@ class MicroWorldAdaLNTransformer(WanTransformer3DModel):
             shift = shift.unsqueeze(1)
             scale = scale.unsqueeze(1)
 
-        hidden_states = (self.norm_out(hidden_states.float()) * (1 + scale) + shift).type_as(hidden_states)
+        # ``norm_out`` is the fused ``AdaLayerNorm`` (post #2585): takes
+        # ``(x, scale, shift)`` and computes ``layernorm(x) * (1 + scale) + shift``
+        # internally. Pre-merge this was a plain LayerNorm and the modulation
+        # was applied here; that path is now handled inside the fused op.
+        hidden_states = self.norm_out(hidden_states, scale, shift).type_as(hidden_states)
         hidden_states = self.proj_out(hidden_states)
 
         hidden_states = hidden_states.reshape(

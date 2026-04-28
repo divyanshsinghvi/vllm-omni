@@ -249,6 +249,20 @@ class MicroWorldI2WPipeline(
         transformer_config = load_transformer_config(model, "transformer", local_files_only)
         self.transformer = create_transformer_from_config(transformer_config)
         self.transformer_config = self.transformer.config
+        self._text_len = int(transformer_config.get("text_len", 512))
+
+        # Check for LoRA weights at model root — merged into transformer
+        # after base load_weights completes.
+        # Skip via MICRO_WORLD_SKIP_LORA=1 for debugging the LoRA-free baseline.
+        self._lora_path: str | None = None
+        lora_path = os.path.join(model, "lora_diffusion_pytorch_model.safetensors") if local_files_only else None
+        if lora_path and os.path.exists(lora_path):
+            if os.environ.get("MICRO_WORLD_SKIP_LORA") == "1":
+                logger.info(f"Skipping LoRA weights at {lora_path} (MICRO_WORLD_SKIP_LORA=1)")
+            else:
+                logger.info(f"Found LoRA weights at {lora_path}")
+                self._lora_path = lora_path
+        self._lora_weight: float = 1.0
 
         # Scheduler
         flow_shift = od_config.flow_shift if od_config.flow_shift is not None else 3.0
@@ -286,11 +300,162 @@ class MicroWorldI2WPipeline(
         return self._current_timestep
 
     def load_weights(self, weights):
-        """Load weights using AutoWeightsLoader for vLLM integration."""
+        """Load weights using AutoWeightsLoader for vLLM integration.
+
+        If a Kohya-style LoRA was found at pipeline init, merge it into the
+        transformer weights once the base checkpoint has finished loading.
+        """
         from vllm.model_executor.models.utils import AutoWeightsLoader
 
         loader = AutoWeightsLoader(self)
-        return loader.load_weights(weights)
+        loaded = loader.load_weights(weights)
+        if self._lora_path is not None:
+            self._merge_lora(self._lora_path, self._lora_weight)
+        return loaded
+
+    def _merge_lora(self, lora_path: str, multiplier: float = 1.0) -> None:
+        """Merge a Kohya-style LoRA checkpoint into the I2W transformer weights.
+
+        I2W LoRA keys cover the same self/cross attention + FFN sites as T2W,
+        plus the I2V image cross-attention K/V (``cross_attn_k_img``,
+        ``cross_attn_v_img``) and the image embedder MLP
+        (``img_emb_proj_1``/``img_emb_proj_3``). vllm-omni's
+        ``WanCrossAttention`` uses ``add_k_proj``/``add_v_proj`` for the
+        image branch (not ``to_k_img``/``to_v_img``), and the image embedder
+        is structured as ``norm1`` + diffusers ``FeedForward`` + ``norm2``
+        rather than reference's ``Sequential[LayerNorm, Linear, GELU, Linear, LayerNorm]``.
+        """
+        import re
+        from collections import defaultdict
+
+        from safetensors.torch import load_file
+
+        state_dict = load_file(lora_path)
+        layers: dict[str, dict[str, torch.Tensor]] = defaultdict(dict)
+        for key, value in state_dict.items():
+            if ".lora_up." in key or ".lora_down." in key:
+                layer, sub = key.split(".", 1)
+                layers[layer][sub] = value
+            elif key.endswith(".alpha"):
+                layer = key[: -len(".alpha")]
+                layers[layer]["alpha"] = value
+
+        _TOP_LEVEL_REMAP = [
+            ("head_head", "proj_out"),
+            ("time_embedding_0", "condition_embedder.time_embedder.linear_1"),
+            ("time_embedding_2", "condition_embedder.time_embedder.linear_2"),
+            ("time_projection_1", "condition_embedder.time_proj"),
+            ("text_embedding_0", "condition_embedder.text_embedder.linear_1"),
+            ("text_embedding_2", "condition_embedder.text_embedder.linear_2"),
+            ("img_emb_proj_1", "condition_embedder.image_embedder.ff.net.0.proj"),
+            ("img_emb_proj_3", "condition_embedder.image_embedder.ff.net.2"),
+        ]
+        _BLOCK_REST_MAP = {
+            "self_attn_q": "attn1.to_q",
+            "self_attn_k": "attn1.to_k",
+            "self_attn_v": "attn1.to_v",
+            "self_attn_o": "attn1.to_out",
+            "cross_attn_q": "attn2.to_q",
+            "cross_attn_k": "attn2.to_k",
+            "cross_attn_v": "attn2.to_v",
+            "cross_attn_o": "attn2.to_out",
+            # I2V image cross-attention
+            "cross_attn_k_img": "attn2.add_k_proj",
+            "cross_attn_v_img": "attn2.add_v_proj",
+            "ffn_0": "ffn.net_0.proj",
+            "ffn_2": "ffn.net_2",
+        }
+
+        def _remap(lora_key: str) -> str | None:
+            if not lora_key.startswith("lora_unet__"):
+                return None
+            name = lora_key[len("lora_unet__") :]
+            for old, new in _TOP_LEVEL_REMAP:
+                if name == old:
+                    return new
+            m = re.match(r"^(blocks|action_blocks)_(\d+)_(.+)$", name)
+            if not m:
+                return None
+            prefix, idx, rest = m.group(1), m.group(2), m.group(3)
+            sub = _BLOCK_REST_MAP.get(rest)
+            if sub is None:
+                return None
+            return f"{prefix}.{idx}.{sub}"
+
+        # Self-attention q/k/v fuse into ``attn1.to_qkv`` (QKVParallelLinear).
+        from collections import defaultdict as _dd
+
+        fused_qkv: dict[str, dict[str, tuple[torch.Tensor, torch.Tensor, float]]] = _dd(dict)
+        _qkv_re = re.compile(r"^lora_unet__(blocks|action_blocks)_(\d+)_self_attn_(q|k|v)$")
+
+        named_modules = dict(self.transformer.named_modules())
+        merged = 0
+        skipped = 0
+        for lora_key, elems in layers.items():
+            up = elems.get("lora_up.weight")
+            down = elems.get("lora_down.weight")
+            if up is None or down is None:
+                skipped += 1
+                continue
+            alpha_t = elems.get("alpha")
+            alpha = float(alpha_t.item()) / up.shape[1] if alpha_t is not None else 1.0
+
+            qkv_match = _qkv_re.match(lora_key)
+            if qkv_match:
+                prefix, idx, shard_id = qkv_match.group(1), qkv_match.group(2), qkv_match.group(3)
+                fused_target = f"{prefix}.{idx}.attn1.to_qkv"
+                fused_qkv[fused_target][shard_id] = (up, down, alpha)
+                continue
+
+            target = _remap(lora_key)
+            if target is None or target not in named_modules:
+                skipped += 1
+                continue
+            module = named_modules[target]
+            if not hasattr(module, "weight") or module.weight is None:
+                skipped += 1
+                continue
+            with torch.no_grad():
+                w = module.weight
+                up_t = up.to(device=w.device, dtype=w.dtype)
+                down_t = down.to(device=w.device, dtype=w.dtype)
+                delta = torch.mm(up_t, down_t)
+                w.data.add_(multiplier * alpha * delta)
+            merged += 1
+
+        from vllm.model_executor.model_loader.weight_utils import default_weight_loader
+
+        for fused_target, shards in fused_qkv.items():
+            module = named_modules.get(fused_target)
+            if module is None or not hasattr(module, "weight"):
+                skipped += len(shards)
+                continue
+            qkv_param = module.weight
+            head_size = getattr(module, "head_size", None)
+            n_heads_q = getattr(module, "total_num_heads", None)
+            n_heads_kv = getattr(module, "total_num_kv_heads", n_heads_q)
+            if head_size is None or n_heads_q is None:
+                skipped += len(shards)
+                continue
+            q_size = n_heads_q * head_size
+            kv_size = n_heads_kv * head_size
+            offsets = {
+                "q": (0, q_size),
+                "k": (q_size, q_size + kv_size),
+                "v": (q_size + kv_size, q_size + 2 * kv_size),
+            }
+            weight_loader = getattr(qkv_param, "weight_loader", default_weight_loader)
+            with torch.no_grad():
+                for shard_id, (up, down, alpha) in shards.items():
+                    start, end = offsets[shard_id]
+                    up_t = up.to(device=qkv_param.device, dtype=qkv_param.dtype)
+                    down_t = down.to(device=qkv_param.device, dtype=qkv_param.dtype)
+                    delta = multiplier * alpha * torch.mm(up_t, down_t)
+                    existing = qkv_param.data[start:end].clone()
+                    weight_loader(qkv_param, existing + delta, shard_id)
+                    merged += 1
+
+        logger.info("LoRA merge: %d layers merged, %d skipped (of %d)", merged, skipped, len(layers))
 
     def encode_prompt(
         self,

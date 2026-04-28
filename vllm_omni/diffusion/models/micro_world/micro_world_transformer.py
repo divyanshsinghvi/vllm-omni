@@ -403,6 +403,14 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
             ("time_projection.1.", "condition_embedder.time_proj."),
             ("text_embedding.0.", "condition_embedder.text_embedder.linear_1."),
             ("text_embedding.2.", "condition_embedder.text_embedder.linear_2."),
+            # Image embedder (I2V variants). Reference Wan ``MLPProj`` is a
+            # Sequential of [LayerNorm, Linear, GELU, Linear, LayerNorm];
+            # vllm-omni splits it into ``norm1`` + diffusers ``FeedForward``
+            # (``ff.net.0.proj``/``ff.net.2``) + ``norm2``.
+            ("img_emb.proj.0.", "condition_embedder.image_embedder.norm1."),
+            ("img_emb.proj.1.", "condition_embedder.image_embedder.ff.net.0.proj."),
+            ("img_emb.proj.3.", "condition_embedder.image_embedder.ff.net.2."),
+            ("img_emb.proj.4.", "condition_embedder.image_embedder.norm2."),
         ]
 
         params_dict = dict(self.named_parameters())
@@ -431,9 +439,12 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
             name = name.replace(".cross_attn.o.", ".attn2.to_out.")
             name = name.replace(".cross_attn.norm_q.", ".attn2.norm_q.")
             name = name.replace(".cross_attn.norm_k.", ".attn2.norm_k.")
-            name = name.replace(".cross_attn.k_img.", ".attn2.to_k_img.")
-            name = name.replace(".cross_attn.v_img.", ".attn2.to_v_img.")
-            name = name.replace(".cross_attn.norm_k_img.", ".attn2.norm_k_img.")
+            # Image cross-attention K/V (I2V variants only). vllm-omni's
+            # `WanCrossAttention` uses `add_k_proj`/`add_v_proj`/`norm_added_k`
+            # for the image branch, not `to_k_img`/`to_v_img`/`norm_k_img`.
+            name = name.replace(".cross_attn.k_img.", ".attn2.add_k_proj.")
+            name = name.replace(".cross_attn.v_img.", ".attn2.add_v_proj.")
+            name = name.replace(".cross_attn.norm_k_img.", ".attn2.norm_added_k.")
             # modulation → scale_shift_table (only for blocks, not action module)
             if ".modulation." in name and "action_preprocess" not in name:
                 name = name.replace(".modulation.", ".scale_shift_table.")
@@ -731,6 +742,21 @@ class MicroWorldAdaLNTransformer(WanTransformer3DModel):
 
         weight_name_remapping = {
             "scale_shift_table": "output_scale_shift_prepare.scale_shift_table",
+            # Top-level Wan2.1 → vllm-omni rename
+            "head.head.": "proj_out.",
+            "head.modulation": "output_scale_shift_prepare.scale_shift_table",
+            "time_embedding.0.": "condition_embedder.time_embedder.linear_1.",
+            "time_embedding.2.": "condition_embedder.time_embedder.linear_2.",
+            "time_projection.1.": "condition_embedder.time_proj.",
+            "text_embedding.0.": "condition_embedder.text_embedder.linear_1.",
+            "text_embedding.2.": "condition_embedder.text_embedder.linear_2.",
+            # Image embedder (I2V): reference Wan ``MLPProj`` is a Sequential
+            # of [LayerNorm, Linear, GELU, Linear, LayerNorm]; vllm-omni uses
+            # ``norm1`` + diffusers ``FeedForward`` + ``norm2``.
+            "img_emb.proj.0.": "condition_embedder.image_embedder.norm1.",
+            "img_emb.proj.1.": "condition_embedder.image_embedder.ff.net.0.proj.",
+            "img_emb.proj.3.": "condition_embedder.image_embedder.ff.net.2.",
+            "img_emb.proj.4.": "condition_embedder.image_embedder.norm2.",
         }
 
         params_dict = dict(self.named_parameters())
@@ -752,9 +778,12 @@ class MicroWorldAdaLNTransformer(WanTransformer3DModel):
             name = name.replace(".cross_attn.o.", ".attn2.to_out.")
             name = name.replace(".cross_attn.norm_q.", ".attn2.norm_q.")
             name = name.replace(".cross_attn.norm_k.", ".attn2.norm_k.")
-            name = name.replace(".cross_attn.k_img.", ".attn2.to_k_img.")
-            name = name.replace(".cross_attn.v_img.", ".attn2.to_v_img.")
-            name = name.replace(".cross_attn.norm_k_img.", ".attn2.norm_k_img.")
+            # Image cross-attention K/V (I2V variants only). vllm-omni's
+            # `WanCrossAttention` uses `add_k_proj`/`add_v_proj`/`norm_added_k`
+            # for the image branch, not `to_k_img`/`to_v_img`/`norm_k_img`.
+            name = name.replace(".cross_attn.k_img.", ".attn2.add_k_proj.")
+            name = name.replace(".cross_attn.v_img.", ".attn2.add_v_proj.")
+            name = name.replace(".cross_attn.norm_k_img.", ".attn2.norm_added_k.")
             if ".modulation." in name and "action_preprocess" not in name and "action_adaLN" not in name:
                 name = name.replace(".modulation.", ".scale_shift_table.")
 

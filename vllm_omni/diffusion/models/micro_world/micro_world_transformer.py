@@ -741,8 +741,9 @@ class MicroWorldAdaLNTransformer(WanTransformer3DModel):
         self.stacked_params_mapping = stacked_params_mapping
 
         weight_name_remapping = {
-            "scale_shift_table": "output_scale_shift_prepare.scale_shift_table",
-            # Top-level Wan2.1 → vllm-omni rename
+            # Top-level Wan2.1 → vllm-omni rename. Note: do NOT add a bare
+            # ``scale_shift_table`` substring rule here — every per-block
+            # ``blocks.N.scale_shift_table`` would also get clobbered.
             "head.head.": "proj_out.",
             "head.modulation": "output_scale_shift_prepare.scale_shift_table",
             "time_embedding.0.": "condition_embedder.time_embedder.linear_1.",
@@ -784,11 +785,24 @@ class MicroWorldAdaLNTransformer(WanTransformer3DModel):
             name = name.replace(".cross_attn.k_img.", ".attn2.add_k_proj.")
             name = name.replace(".cross_attn.v_img.", ".attn2.add_v_proj.")
             name = name.replace(".cross_attn.norm_k_img.", ".attn2.norm_added_k.")
-            if ".modulation." in name and "action_preprocess" not in name and "action_adaLN" not in name:
-                name = name.replace(".modulation.", ".scale_shift_table.")
 
+            # Apply explicit top-level remaps (e.g. ``head.modulation`` →
+            # top-level ``output_scale_shift_prepare.scale_shift_table``)
+            # BEFORE the per-block modulation fallback below, so we don't
+            # accidentally convert ``head.modulation`` into
+            # ``head.scale_shift_table``.
             for old, new in weight_name_remapping.items():
                 name = name.replace(old, new)
+
+            if ".modulation." in name and "action_preprocess" not in name and "action_adaLN" not in name:
+                name = name.replace(".modulation.", ".scale_shift_table.")
+            # Scalar ``blocks.N.modulation`` (no trailing dot) — Wan2.1
+            # stores it as a leaf parameter; map to ``scale_shift_table``.
+            if name.endswith(".modulation") and "action_preprocess" not in name and "action_adaLN" not in name:
+                name = name[: -len(".modulation")] + ".scale_shift_table"
+            # ``norm3`` → ``norm2`` (Wan2.1 cross-attn pre-norm rename in
+            # diffusers port).
+            name = name.replace(".norm3.", ".norm2.")
 
             lookup_name = name
 

@@ -75,10 +75,14 @@ def create_transformer_from_config(config: dict) -> MicroWorldAdaLNTransformer:
         kwargs["num_attention_heads"] = config["num_attention_heads"]
     if "attention_head_dim" in config:
         kwargs["attention_head_dim"] = config["attention_head_dim"]
-    if "in_dim" in config:
-        kwargs["in_channels"] = config["in_dim"]
+    # ``in_channels`` is the logical VAE channel count (16); ``in_dim`` is
+    # the actual patch_embed input (36 for Wan I2V — concatenation of noise,
+    # image latent, and a binary mask). Prefer ``in_dim`` so patch_embedding
+    # weights load with the correct shape.
     if "in_channels" in config:
         kwargs["in_channels"] = config["in_channels"]
+    if "in_dim" in config:
+        kwargs["in_channels"] = config["in_dim"]
     if "out_dim" in config:
         kwargs["out_channels"] = config["out_dim"]
     if "out_channels" in config:
@@ -101,6 +105,13 @@ def create_transformer_from_config(config: dict) -> MicroWorldAdaLNTransformer:
         kwargs["added_kv_proj_dim"] = config["added_kv_proj_dim"]
     if "rope_max_seq_len" in config:
         kwargs["rope_max_seq_len"] = config["rope_max_seq_len"]
+    # I2V variants need the image embedder + image cross-attention K/V even
+    # though the AMD config doesn't list these dims. Wan2.1 I2V uses
+    # ``image_dim=1280`` (CLIP feature dim) and ``added_kv_proj_dim=dim``
+    # (image branch K/V projection input dim).
+    if config.get("model_type") == "i2v":
+        kwargs.setdefault("image_dim", 1280)
+        kwargs.setdefault("added_kv_proj_dim", config.get("dim", 5120))
 
     # Micro-World specific action params
     action_kwargs: dict[str, Any] = {}
@@ -486,6 +497,15 @@ class MicroWorldI2WPipeline(
 
         prompt_embeds = self.text_encoder(text_input_ids, attention_mask=attention_mask)[0]
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
+        # Match the reference Micro-World convention: zero out the T5 output
+        # for PAD-token positions. Reference encodes the prompt without
+        # padding then pads the *output* with zeros; we tokenize with
+        # ``padding='max_length'`` so the T5 encoder produces non-zero
+        # hidden states for PAD tokens. Without zeroing those positions,
+        # cross-attention K/V over the padded region pull the output away
+        # from the trained distribution — the model collapses to flat
+        # color generation.
+        prompt_embeds = prompt_embeds * attention_mask.unsqueeze(-1).to(prompt_embeds.dtype)
 
         negative_prompt_embeds = None
         if do_classifier_free_guidance:
@@ -503,18 +523,31 @@ class MicroWorldI2WPipeline(
             neg_mask = neg_inputs.attention_mask.to(device)
             negative_prompt_embeds = self.text_encoder(neg_input_ids, attention_mask=neg_mask)[0]
             negative_prompt_embeds = negative_prompt_embeds.to(dtype=dtype, device=device)
+            negative_prompt_embeds = negative_prompt_embeds * neg_mask.unsqueeze(-1).to(negative_prompt_embeds.dtype)
 
         return prompt_embeds, negative_prompt_embeds
 
-    def encode_image(
-        self,
-        image: PIL.Image.Image | list[PIL.Image.Image],
-        device: torch.device | None = None,
-    ) -> torch.Tensor:
-        """Encode image using CLIP image encoder."""
-        device = device or self.device
-        pixel_values = self.image_processor(images=image, return_tensors="pt").pixel_values
-        pixel_values = pixel_values.to(device=device, dtype=self.image_encoder.dtype)
+    def encode_image(self, image: PIL.Image.Image, device: torch.device) -> torch.Tensor:
+        """Encode a single PIL image using the OpenCLIP ViT-H/14 encoder.
+
+        Bit-exact match to reference Micro-World ``CLIPModel.forward``:
+        torch bicubic resize to 224x224 with ``align_corners=False`` (same
+        path Wan I2V was trained with), then OpenAI per-channel mean/std
+        normalization. Differs from HF ``CLIPImageProcessor`` only in the
+        resize implementation (``F.interpolate`` vs PIL bicubic), but that
+        small difference compounds through the 32-layer ViT enough to
+        matter — so we match the reference path verbatim.
+        """
+        import torchvision.transforms.functional as TF
+
+        x = TF.to_tensor(image).sub_(0.5).div_(0.5)  # (3, H, W) in [-1, 1]
+        x = x.unsqueeze(0)
+        x = F.interpolate(x, size=(224, 224), mode="bicubic", align_corners=False)
+        x = x.mul_(0.5).add_(0.5)  # back to [0, 1]
+        mean = torch.tensor([0.48145466, 0.4578275, 0.40821073], device=x.device).view(1, 3, 1, 1)
+        std = torch.tensor([0.26862954, 0.26130258, 0.27577711], device=x.device).view(1, 3, 1, 1)
+        x = (x - mean) / std
+        pixel_values = x.to(device=device, dtype=self.image_encoder.dtype)
         image_embeds = self.image_encoder(pixel_values, output_hidden_states=True)
         return image_embeds.hidden_states[-2]
 
@@ -544,19 +577,22 @@ class MicroWorldI2WPipeline(
         extra_args: dict[str, Any] | None,
         device: torch.device,
         dtype: torch.dtype,
+        num_action_frames: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Extract and validate action tensors from extra_args."""
-        if extra_args is None:
-            raise ValueError(
-                "mouse_actions and keyboard_actions are required for Micro-World I2W generation. "
-                "Pass them via extra_params in the request."
-            )
+        """Extract action tensors from extra_args.
 
-        mouse_actions = extra_args.get("mouse_actions")
-        keyboard_actions = extra_args.get("keyboard_actions")
+        If actions are missing and ``num_action_frames`` is given, returns
+        zero-filled defaults (used for warmup / dummy run).
+        """
+        mouse_actions = extra_args.get("mouse_actions") if extra_args else None
+        keyboard_actions = extra_args.get("keyboard_actions") if extra_args else None
 
         if mouse_actions is None or keyboard_actions is None:
-            raise ValueError("Both 'mouse_actions' and 'keyboard_actions' must be provided in extra_params.")
+            if num_action_frames is not None:
+                mouse_actions = torch.zeros((num_action_frames, 2), dtype=dtype, device=device)
+                keyboard_actions = torch.zeros((num_action_frames, 7), dtype=dtype, device=device)
+            else:
+                raise ValueError("Both 'mouse_actions' and 'keyboard_actions' must be provided in extra_params.")
 
         if not isinstance(mouse_actions, torch.Tensor):
             mouse_actions = torch.tensor(mouse_actions, dtype=dtype, device=device)
@@ -662,7 +698,7 @@ class MicroWorldI2WPipeline(
 
         # Parse actions
         extra_args = req.sampling_params.extra_args if hasattr(req.sampling_params, "extra_args") else None
-        mouse_actions, keyboard_actions = self._parse_actions(extra_args, device, dtype)
+        mouse_actions, keyboard_actions = self._parse_actions(extra_args, device, dtype, num_action_frames=num_frames)
 
         # Encode prompt
         if prompt_embeds is None:
@@ -674,23 +710,19 @@ class MicroWorldI2WPipeline(
                 dtype=dtype,
             )
 
-        # Encode image with CLIP
-        if isinstance(image, PIL.Image.Image):
-            image = image.resize((width, height), PIL.Image.Resampling.LANCZOS)
-            clip_fea = self.encode_image(image, device=device)
-        else:
-            clip_fea = None
+        # Encode image with CLIP. Pass the raw input image directly —
+        # ``encode_image`` does its own bicubic interpolate to 224x224
+        # internally, so a pre-resize here would double-interpolate.
+        clip_fea = self.encode_image(image, device=device)
 
-        # Encode image with VAE for condition latent
+        # Encode image with VAE for condition latent (image tiled to all frames,
+        # masked so only frame 0 keeps the image, the rest is zero).
         from diffusers.video_processor import VideoProcessor
 
         video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor_spatial)
-        if isinstance(image, PIL.Image.Image):
-            image_tensor = video_processor.preprocess(image, height=height, width=width)
-        else:
-            image_tensor = image
+        image_tensor = video_processor.preprocess(image, height=height, width=width)
 
-        # Prepare noise latents
+        # Prepare 16-channel noise latents ``x``.
         num_channels_latents = self.transformer_config.out_channels
         latents = self.prepare_latents(
             batch_size=prompt_embeds.shape[0],
@@ -703,31 +735,62 @@ class MicroWorldI2WPipeline(
             generator=generator,
         )
 
-        # Encode image condition
-        image_tensor = image_tensor.unsqueeze(2).to(device=device, dtype=self.vae.dtype)
-        latent_condition = retrieve_latents(self.vae.encode(image_tensor), sample_mode="argmax")
-        latent_condition = latent_condition.repeat(prompt_embeds.shape[0], 1, 1, 1, 1)
+        # Build the I2V image conditioning ``y = cat([mask, masked_video])``
+        # following the reference Micro-World pipeline. ``y`` is 20-channel
+        # (4 mask + 16 image-conditioned video latents) and gets concatenated
+        # with the 16-channel noise latents inside the denoising loop to form
+        # the 36-channel patch_embed input.
+        bs = prompt_embeds.shape[0]
+        # 1) Tile input image to ``(1, 3, T, H, W)`` "init video" — frame 0 is
+        #    the image, the rest are zeros.
+        init_video = image_tensor.unsqueeze(2).to(device=device, dtype=torch.float32)  # (1, 3, 1, H, W)
+        if init_video.shape[2] < num_frames:
+            pad_frames = torch.zeros(
+                init_video.shape[0],
+                init_video.shape[1],
+                num_frames - init_video.shape[2],
+                height,
+                width,
+                dtype=init_video.dtype,
+                device=device,
+            )
+            masked_video = torch.cat([init_video, pad_frames], dim=2)
+        else:
+            masked_video = init_video[:, :, :num_frames]
+        masked_video = masked_video.to(self.vae.dtype)
 
-        # Normalize condition latents
+        # 2) VAE-encode the masked video → 16-channel latent. Apply the VAE's
+        #    per-channel mean/std normalization (matches diffusers Wan I2V).
+        masked_video_latents = retrieve_latents(self.vae.encode(masked_video), sample_mode="argmax")
+        masked_video_latents = masked_video_latents.repeat(bs, 1, 1, 1, 1).to(torch.float32)
         latents_mean = (
             torch.tensor(self.vae.config.latents_mean)
             .view(1, self.vae.config.z_dim, 1, 1, 1)
-            .to(latent_condition.device, latent_condition.dtype)
+            .to(masked_video_latents.device, masked_video_latents.dtype)
         )
-        latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
-            latent_condition.device, latent_condition.dtype
+        latents_std_inv = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
+            masked_video_latents.device, masked_video_latents.dtype
         )
-        latent_condition = (latent_condition - latents_mean) * latents_std
-        latent_condition = latent_condition.to(torch.float32)
+        masked_video_latents = (masked_video_latents - latents_mean) * latents_std_inv
 
-        # Create first-frame mask
-        num_latent_frames = latents.shape[2]
-        latent_height = latents.shape[3]
-        latent_width = latents.shape[4]
-        first_frame_mask = torch.ones(
-            1, 1, num_latent_frames, latent_height, latent_width, dtype=torch.float32, device=device
+        # 3) Build the 4-channel mask in latent spatial+temporal dims. The
+        #    reference replicates the first frame's mask 4× temporally (matching
+        #    the VAE's temporal compression ratio), then collapses every 4 frames
+        #    into the channel dim (B, 4, T_lat, H, W).
+        mask_video = torch.ones(1, 1, num_frames, height, width, dtype=torch.float32, device=device)
+        mask_video[:, :, 0] = 0  # keep first frame
+        first_frame_chunk = mask_video[:, :, 0:1].repeat(1, 1, 4, 1, 1)
+        rest_chunk = mask_video[:, :, 1:]
+        mask_video = torch.cat([first_frame_chunk, rest_chunk], dim=2)
+        t_lat_full = mask_video.shape[2] // 4
+        mask_video = mask_video.view(1, t_lat_full, 4, height, width).transpose(1, 2)
+        mask_latents = _resize_mask(1.0 - mask_video, masked_video_latents, process_first_frame_only=True).to(
+            device, dtype=torch.float32
         )
-        first_frame_mask[:, :, 0] = 0
+        mask_latents = mask_latents.repeat(bs, 1, 1, 1, 1)
+
+        # 4) y = cat([mask, masked_video], dim=1) — 20 channels
+        y_cond = torch.cat([mask_latents, masked_video_latents], dim=1)
 
         # Timesteps
         self.scheduler.set_timesteps(num_steps, device=device)
@@ -741,29 +804,17 @@ class MicroWorldI2WPipeline(
             for t in timesteps:
                 self._current_timestep = t
 
-                # I2V blending: condition first frame, denoise the rest
-                latent_model_input = (1 - first_frame_mask) * latent_condition + first_frame_mask * latents
-                latent_model_input = latent_model_input.to(dtype)
-
-                # Expand timesteps per patch for I2V
-                patch_height = latents.shape[3] // patch_size[1]
-                patch_width = latents.shape[4] // patch_size[2]
-                patch_mask = first_frame_mask[:, :, :, :: patch_size[1], :: patch_size[2]]
-                patch_mask = patch_mask[:, :, :, :patch_height, :patch_width]
-                temp_ts = (patch_mask[0][0] * t).flatten()
-                timestep = temp_ts.unsqueeze(0).expand(latents.shape[0], -1)
-
-                # Duplicate for CFG
-                if do_cfg:
-                    clip_fea_cfg = torch.cat([clip_fea] * 2) if clip_fea is not None else None
-                else:
-                    clip_fea_cfg = clip_fea
+                # 5) Build the 36-channel transformer input by concatenating
+                #    16-channel noise latents with the 20-channel image
+                #    conditioning ``y``. patch_embed expects in_channels=36.
+                latent_model_input = torch.cat([latents, y_cond], dim=1).to(dtype)
+                timestep = t.expand(latents.shape[0])
 
                 positive_kwargs = {
                     "hidden_states": latent_model_input,
                     "timestep": timestep,
                     "encoder_hidden_states": prompt_embeds,
-                    "encoder_hidden_states_image": clip_fea_cfg if not do_cfg else clip_fea,
+                    "encoder_hidden_states_image": clip_fea,
                     "return_dict": False,
                     "current_model": self.transformer,
                     "mouse_actions": mouse_actions,
@@ -797,9 +848,6 @@ class MicroWorldI2WPipeline(
         if current_omni_platform.is_available():
             current_omni_platform.empty_cache()
         self._current_timestep = None
-
-        # Final blending
-        latents = (1 - first_frame_mask) * latent_condition + first_frame_mask * latents
 
         # Decode
         if output_type == "latent":

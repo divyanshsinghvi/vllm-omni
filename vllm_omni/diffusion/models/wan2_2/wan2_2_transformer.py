@@ -401,15 +401,6 @@ class WanSelfAttention(nn.Module):
         if rotary_emb is not None:
             self.rotary_embedding = RotaryEmbeddingWan(is_neox_style=False, half_head_dim=True)
             freqs_cos, freqs_sin = rotary_emb
-            # `WanRotaryPosEmbed` does ``repeat_interleave(2)`` so cos/sin arrive
-            # at full head_dim; the pair-rotation rope kernel (forward_native and
-            # forward_cuda) expects half head_dim. mindiesd's NPU path expands
-            # internally, so undo the interleave only when cos/sin match x's
-            # head_dim. Each consecutive pair is identical so the even slice
-            # preserves the original freqs.
-            if freqs_cos.shape[-1] == query.shape[-1]:
-                freqs_cos = freqs_cos[..., 0::2]
-                freqs_sin = freqs_sin[..., 0::2]
             query = self.rotary_embedding(query, freqs_cos, freqs_sin)
             key = self.rotary_embedding(key, freqs_cos, freqs_sin)
 

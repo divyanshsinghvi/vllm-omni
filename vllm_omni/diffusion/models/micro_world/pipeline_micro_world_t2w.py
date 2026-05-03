@@ -193,11 +193,7 @@ class MicroWorldT2WPipeline(nn.Module, CFGParallelMixin, ProgressBarMixin, Diffu
 
         # Store config for latent shape computation
         self.transformer_config = self.transformer.config
-        # Reference WanActionControlNetModel re-pads prompt embeds to text_len
-        # with zeros before text_embedding, then attends without a key mask.
-        # Cross-attention sees all 512 (projected-zero) "virtual" context tokens,
-        # so we must hand the transformer the same shape — even though the T5
-        # output has been trimmed for compute.
+        # Reference re-pads T5 output to text_len with zeros before cross-attn.
         self._text_len = int(transformer_config.get("text_len", 512))
 
         # Scheduler

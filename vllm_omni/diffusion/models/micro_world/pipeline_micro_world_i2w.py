@@ -75,10 +75,7 @@ def create_transformer_from_config(config: dict) -> MicroWorldAdaLNTransformer:
         kwargs["num_attention_heads"] = config["num_attention_heads"]
     if "attention_head_dim" in config:
         kwargs["attention_head_dim"] = config["attention_head_dim"]
-    # ``in_channels`` is the logical VAE channel count (16); ``in_dim`` is
-    # the actual patch_embed input (36 for Wan I2V — concatenation of noise,
-    # image latent, and a binary mask). Prefer ``in_dim`` so patch_embedding
-    # weights load with the correct shape.
+    # in_dim (36 for I2V) overrides in_channels (16) so patch_embed loads correctly.
     if "in_channels" in config:
         kwargs["in_channels"] = config["in_channels"]
     if "in_dim" in config:
@@ -105,10 +102,7 @@ def create_transformer_from_config(config: dict) -> MicroWorldAdaLNTransformer:
         kwargs["added_kv_proj_dim"] = config["added_kv_proj_dim"]
     if "rope_max_seq_len" in config:
         kwargs["rope_max_seq_len"] = config["rope_max_seq_len"]
-    # I2V variants need the image embedder + image cross-attention K/V even
-    # though the AMD config doesn't list these dims. Wan2.1 I2V uses
-    # ``image_dim=1280`` (CLIP feature dim) and ``added_kv_proj_dim=dim``
-    # (image branch K/V projection input dim).
+    # AMD I2V config omits these; default to Wan2.1 I2V values.
     if config.get("model_type") == "i2v":
         kwargs.setdefault("image_dim", 1280)
         kwargs.setdefault("added_kv_proj_dim", config.get("dim", 5120))
@@ -262,9 +256,7 @@ class MicroWorldI2WPipeline(
         self.transformer_config = self.transformer.config
         self._text_len = int(transformer_config.get("text_len", 512))
 
-        # Check for LoRA weights at model root — merged into transformer
-        # after base load_weights completes.
-        # Skip via MICRO_WORLD_SKIP_LORA=1 for debugging the LoRA-free baseline.
+        # MICRO_WORLD_SKIP_LORA=1 skips the LoRA merge for baseline debugging.
         self._lora_path: str | None = None
         lora_path = os.path.join(model, "lora_diffusion_pytorch_model.safetensors") if local_files_only else None
         if lora_path and os.path.exists(lora_path):
@@ -311,11 +303,6 @@ class MicroWorldI2WPipeline(
         return self._current_timestep
 
     def load_weights(self, weights):
-        """Load weights using AutoWeightsLoader for vLLM integration.
-
-        If a Kohya-style LoRA was found at pipeline init, merge it into the
-        transformer weights once the base checkpoint has finished loading.
-        """
         from vllm.model_executor.models.utils import AutoWeightsLoader
 
         loader = AutoWeightsLoader(self)
@@ -325,17 +312,6 @@ class MicroWorldI2WPipeline(
         return loaded
 
     def _merge_lora(self, lora_path: str, multiplier: float = 1.0) -> None:
-        """Merge a Kohya-style LoRA checkpoint into the I2W transformer weights.
-
-        I2W LoRA keys cover the same self/cross attention + FFN sites as T2W,
-        plus the I2V image cross-attention K/V (``cross_attn_k_img``,
-        ``cross_attn_v_img``) and the image embedder MLP
-        (``img_emb_proj_1``/``img_emb_proj_3``). vllm-omni's
-        ``WanCrossAttention`` uses ``add_k_proj``/``add_v_proj`` for the
-        image branch (not ``to_k_img``/``to_v_img``), and the image embedder
-        is structured as ``norm1`` + diffusers ``FeedForward`` + ``norm2``
-        rather than reference's ``Sequential[LayerNorm, Linear, GELU, Linear, LayerNorm]``.
-        """
         import re
         from collections import defaultdict
 
@@ -370,7 +346,6 @@ class MicroWorldI2WPipeline(
             "cross_attn_k": "attn2.to_k",
             "cross_attn_v": "attn2.to_v",
             "cross_attn_o": "attn2.to_out",
-            # I2V image cross-attention
             "cross_attn_k_img": "attn2.add_k_proj",
             "cross_attn_v_img": "attn2.add_v_proj",
             "ffn_0": "ffn.net_0.proj",
@@ -393,7 +368,7 @@ class MicroWorldI2WPipeline(
                 return None
             return f"{prefix}.{idx}.{sub}"
 
-        # Self-attention q/k/v fuse into ``attn1.to_qkv`` (QKVParallelLinear).
+        # Self-attention q/k/v are fused into attn1.to_qkv.
         from collections import defaultdict as _dd
 
         fused_qkv: dict[str, dict[str, tuple[torch.Tensor, torch.Tensor, float]]] = _dd(dict)
@@ -497,14 +472,8 @@ class MicroWorldI2WPipeline(
 
         prompt_embeds = self.text_encoder(text_input_ids, attention_mask=attention_mask)[0]
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
-        # Match the reference Micro-World convention: zero out the T5 output
-        # for PAD-token positions. Reference encodes the prompt without
-        # padding then pads the *output* with zeros; we tokenize with
-        # ``padding='max_length'`` so the T5 encoder produces non-zero
-        # hidden states for PAD tokens. Without zeroing those positions,
-        # cross-attention K/V over the padded region pull the output away
-        # from the trained distribution — the model collapses to flat
-        # color generation.
+        # Zero T5 output at PAD positions to match reference; otherwise
+        # cross-attention over padded K/V collapses the output to flat color.
         prompt_embeds = prompt_embeds * attention_mask.unsqueeze(-1).to(prompt_embeds.dtype)
 
         negative_prompt_embeds = None
@@ -528,26 +497,16 @@ class MicroWorldI2WPipeline(
         return prompt_embeds, negative_prompt_embeds
 
     def encode_image(self, image: PIL.Image.Image, device: torch.device) -> torch.Tensor:
-        """Encode a single PIL image using the OpenCLIP ViT-H/14 encoder.
-
-        Bit-exact match to reference Micro-World ``CLIPModel.forward``:
-        torch bicubic resize to 224x224 with ``align_corners=False`` (same
-        path Wan I2V was trained with), then OpenAI per-channel mean/std
-        normalization. Differs from HF ``CLIPImageProcessor`` only in the
-        resize implementation (``F.interpolate`` vs PIL bicubic), but that
-        small difference compounds through the 32-layer ViT enough to
-        matter — so we match the reference path verbatim.
-        """
+        # Reference uses torch bicubic interpolate, not HF CLIPImageProcessor's
+        # PIL bicubic; the delta compounds across 32 ViT layers.
         import torchvision.transforms.functional as TF
 
-        x = TF.to_tensor(image).sub_(0.5).div_(0.5)  # (3, H, W) in [-1, 1]
-        x = x.unsqueeze(0)
+        x = TF.to_tensor(image).sub_(0.5).div_(0.5).unsqueeze(0)
         x = F.interpolate(x, size=(224, 224), mode="bicubic", align_corners=False)
-        x = x.mul_(0.5).add_(0.5)  # back to [0, 1]
+        x = x.mul_(0.5).add_(0.5)
         mean = torch.tensor([0.48145466, 0.4578275, 0.40821073], device=x.device).view(1, 3, 1, 1)
         std = torch.tensor([0.26862954, 0.26130258, 0.27577711], device=x.device).view(1, 3, 1, 1)
-        x = (x - mean) / std
-        pixel_values = x.to(device=device, dtype=self.image_encoder.dtype)
+        pixel_values = ((x - mean) / std).to(device=device, dtype=self.image_encoder.dtype)
         image_embeds = self.image_encoder(pixel_values, output_hidden_states=True)
         return image_embeds.hidden_states[-2]
 
@@ -710,19 +669,14 @@ class MicroWorldI2WPipeline(
                 dtype=dtype,
             )
 
-        # Encode image with CLIP. Pass the raw input image directly —
-        # ``encode_image`` does its own bicubic interpolate to 224x224
-        # internally, so a pre-resize here would double-interpolate.
+        # encode_image does its own 224x224 interpolate; pass raw image.
         clip_fea = self.encode_image(image, device=device)
 
-        # Encode image with VAE for condition latent (image tiled to all frames,
-        # masked so only frame 0 keeps the image, the rest is zero).
         from diffusers.video_processor import VideoProcessor
 
         video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor_spatial)
         image_tensor = video_processor.preprocess(image, height=height, width=width)
 
-        # Prepare 16-channel noise latents ``x``.
         num_channels_latents = self.transformer_config.out_channels
         latents = self.prepare_latents(
             batch_size=prompt_embeds.shape[0],
@@ -735,14 +689,9 @@ class MicroWorldI2WPipeline(
             generator=generator,
         )
 
-        # Build the I2V image conditioning ``y = cat([mask, masked_video])``
-        # following the reference Micro-World pipeline. ``y`` is 20-channel
-        # (4 mask + 16 image-conditioned video latents) and gets concatenated
-        # with the 16-channel noise latents inside the denoising loop to form
-        # the 36-channel patch_embed input.
+        # Build I2V conditioning y = cat([mask(4ch), masked_video(16ch)]) → 20ch,
+        # later concatenated with 16ch noise to form the 36ch patch_embed input.
         bs = prompt_embeds.shape[0]
-        # 1) Tile input image to ``(1, 3, T, H, W)`` "init video" — frame 0 is
-        #    the image, the rest are zeros.
         init_video = image_tensor.unsqueeze(2).to(device=device, dtype=torch.float32)  # (1, 3, 1, H, W)
         if init_video.shape[2] < num_frames:
             pad_frames = torch.zeros(
@@ -759,8 +708,6 @@ class MicroWorldI2WPipeline(
             masked_video = init_video[:, :, :num_frames]
         masked_video = masked_video.to(self.vae.dtype)
 
-        # 2) VAE-encode the masked video → 16-channel latent. Apply the VAE's
-        #    per-channel mean/std normalization (matches diffusers Wan I2V).
         masked_video_latents = retrieve_latents(self.vae.encode(masked_video), sample_mode="argmax")
         masked_video_latents = masked_video_latents.repeat(bs, 1, 1, 1, 1).to(torch.float32)
         latents_mean = (
@@ -773,12 +720,10 @@ class MicroWorldI2WPipeline(
         )
         masked_video_latents = (masked_video_latents - latents_mean) * latents_std_inv
 
-        # 3) Build the 4-channel mask in latent spatial+temporal dims. The
-        #    reference replicates the first frame's mask 4× temporally (matching
-        #    the VAE's temporal compression ratio), then collapses every 4 frames
-        #    into the channel dim (B, 4, T_lat, H, W).
+        # 4ch latent mask: replicate frame-0 mask 4× temporally (VAE temporal
+        # compression), then fold every 4 frames into the channel dim.
         mask_video = torch.ones(1, 1, num_frames, height, width, dtype=torch.float32, device=device)
-        mask_video[:, :, 0] = 0  # keep first frame
+        mask_video[:, :, 0] = 0
         first_frame_chunk = mask_video[:, :, 0:1].repeat(1, 1, 4, 1, 1)
         rest_chunk = mask_video[:, :, 1:]
         mask_video = torch.cat([first_frame_chunk, rest_chunk], dim=2)
@@ -789,7 +734,6 @@ class MicroWorldI2WPipeline(
         )
         mask_latents = mask_latents.repeat(bs, 1, 1, 1, 1)
 
-        # 4) y = cat([mask, masked_video], dim=1) — 20 channels
         y_cond = torch.cat([mask_latents, masked_video_latents], dim=1)
 
         # Timesteps
@@ -804,9 +748,6 @@ class MicroWorldI2WPipeline(
             for t in timesteps:
                 self._current_timestep = t
 
-                # 5) Build the 36-channel transformer input by concatenating
-                #    16-channel noise latents with the 20-channel image
-                #    conditioning ``y``. patch_embed expects in_channels=36.
                 latent_model_input = torch.cat([latents, y_cond], dim=1).to(dtype)
                 timestep = t.expand(latents.shape[0])
 

@@ -82,10 +82,8 @@ class BaseWanTransformerBlock(WanTransformerBlock):
 class WanActionAttentionBlock(WanTransformerBlock):
     """Transformer block for the parallel ControlNet action branch.
 
-    Block 0 receives raw action features via ``before_proj`` (zero-initialized).
-    Each block produces a skip connection via ``after_proj`` (zero-initialized).
-    The skip connections are accumulated in a stacked tensor that grows as it
-    passes through subsequent blocks.
+    Block 0 projects raw action features via ``before_proj``. Each block emits
+    a skip via ``after_proj``; skips accumulate in a stacked tensor.
     """
 
     def __init__(
@@ -102,13 +100,11 @@ class WanActionAttentionBlock(WanTransformerBlock):
         super().__init__(dim, ffn_dim, num_heads, eps, added_kv_proj_dim, cross_attn_norm)
         self.block_id = block_id
 
-        # Zero-initialized projection from action space to hidden space (block 0 only)
         if block_id == 0:
             self.before_proj = nn.Linear(action_dim, dim)
             nn.init.zeros_(self.before_proj.weight)
             nn.init.zeros_(self.before_proj.bias)
 
-        # Zero-initialized projection for skip connection output
         self.after_proj = nn.Linear(dim, dim)
         nn.init.zeros_(self.after_proj.weight)
         nn.init.zeros_(self.after_proj.bias)
@@ -122,39 +118,17 @@ class WanActionAttentionBlock(WanTransformerBlock):
         rotary_emb: tuple[torch.Tensor, torch.Tensor],
         hidden_states_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Run action block and produce skip connection.
-
-        Args:
-            conditions: For block 0 — raw action features ``[B, S, action_dim]``.
-                For subsequent blocks — stacked ``[num_prev_skips + 1, B, S, dim]``
-                where the last element is the running hidden state.
-            hidden_states: Base branch hidden states (used by block 0's before_proj).
-            encoder_hidden_states: Text embeddings for cross-attention.
-            temb: Timestep embeddings.
-            rotary_emb: RoPE frequencies.
-            hidden_states_mask: Optional attention mask.
-
-        Returns:
-            (stacked_conditions, skip_connection):
-            - stacked_conditions includes all previous skips + current skip + current hidden
-            - skip_connection is the after_proj output for this block
-        """
         if self.block_id == 0:
-            # Project action features and add base hidden states
             c = self.before_proj(conditions) + hidden_states
             all_c = []
         else:
-            # Unstack: previous skips + running hidden state (last element)
             all_c = list(torch.unbind(conditions))
             c = all_c.pop(-1)
 
-        # Standard transformer block forward
         c = super().forward(c, encoder_hidden_states, temb, rotary_emb, hidden_states_mask)
 
-        # Zero-initialized skip connection
         c_skip = self.after_proj(c)
 
-        # Stack: [prev_skips..., new_skip, updated_hidden]
         all_c.append(c_skip)
         all_c.append(c)
         stacked = torch.stack(all_c)
@@ -163,21 +137,7 @@ class WanActionAttentionBlock(WanTransformerBlock):
 
 
 class MicroWorldControlNetTransformer(WanTransformer3DModel):
-    """Wan Transformer with ControlNet-style action injection for T2W generation.
-
-    Extends WanTransformer3DModel with:
-    - An ActionModule that preprocesses mouse/keyboard inputs
-    - A parallel branch of action attention blocks (at every 2nd layer)
-    - Skip connections from action branch to main branch
-
-    Args:
-        action_dim: Dimension of action features (default 1536).
-        mouse_dim: Dimensionality of mouse input (default 2).
-        keyboard_dim: Dimensionality of keyboard input (default 7).
-        action_layers: Indices of main blocks that receive action skip connections.
-            Defaults to every 2nd block [0, 2, 4, ...].
-        **kwargs (Any): Passed to WanTransformer3DModel.
-    """
+    """Wan transformer with ControlNet-style action injection for T2W generation."""
 
     def __init__(
         self,
@@ -292,8 +252,10 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        # Compute RoPE embeddings
-        rotary_emb = self.rope(hidden_states)
+        # WanRotaryPosEmbed emits full head_dim via repeat_interleave(2); the
+        # pair-rotation kernel expects half head_dim, so take the even slice.
+        freqs_cos, freqs_sin = self.rope(hidden_states)
+        rotary_emb = (freqs_cos[..., 0::2], freqs_sin[..., 0::2])
 
         # Patch embedding and flatten to sequence
         hidden_states = self.patch_embedding(hidden_states)
@@ -363,10 +325,6 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
             shift = shift.unsqueeze(1)
             scale = scale.unsqueeze(1)
 
-        # ``norm_out`` is the fused ``AdaLayerNorm`` (post #2585): takes
-        # ``(x, scale, shift)`` and computes ``layernorm(x) * (1 + scale) + shift``
-        # internally. Pre-merge this was a plain LayerNorm and the modulation
-        # was applied here; that path is now handled inside the fused op.
         hidden_states = self.norm_out(hidden_states, scale, shift).type_as(hidden_states)
         hidden_states = self.proj_out(hidden_states)
 
@@ -403,10 +361,7 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
             ("time_projection.1.", "condition_embedder.time_proj."),
             ("text_embedding.0.", "condition_embedder.text_embedder.linear_1."),
             ("text_embedding.2.", "condition_embedder.text_embedder.linear_2."),
-            # Image embedder (I2V variants). Reference Wan ``MLPProj`` is a
-            # Sequential of [LayerNorm, Linear, GELU, Linear, LayerNorm];
-            # vllm-omni splits it into ``norm1`` + diffusers ``FeedForward``
-            # (``ff.net.0.proj``/``ff.net.2``) + ``norm2``.
+            # I2V image embedder: reference MLPProj → vllm-omni norm1+ff+norm2.
             ("img_emb.proj.0.", "condition_embedder.image_embedder.norm1."),
             ("img_emb.proj.1.", "condition_embedder.image_embedder.ff.net.0.proj."),
             ("img_emb.proj.3.", "condition_embedder.image_embedder.ff.net.2."),
@@ -419,14 +374,11 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
         for name, loaded_weight in weights:
             original_name = name
 
-            # --- Top-level Wan2.1 → vllm-omni remapping ---
             for old, new in weight_name_remapping:
                 if old in name:
                     name = name.replace(old, new)
                     break
 
-            # --- Block-level Wan2.1 → diffusers-style name remapping ---
-            # self_attn → attn1, cross_attn → attn2
             name = name.replace(".self_attn.q.", ".attn1.to_q.")
             name = name.replace(".self_attn.k.", ".attn1.to_k.")
             name = name.replace(".self_attn.v.", ".attn1.to_v.")
@@ -439,28 +391,21 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
             name = name.replace(".cross_attn.o.", ".attn2.to_out.")
             name = name.replace(".cross_attn.norm_q.", ".attn2.norm_q.")
             name = name.replace(".cross_attn.norm_k.", ".attn2.norm_k.")
-            # Image cross-attention K/V (I2V variants only). vllm-omni's
-            # `WanCrossAttention` uses `add_k_proj`/`add_v_proj`/`norm_added_k`
-            # for the image branch, not `to_k_img`/`to_v_img`/`norm_k_img`.
+            # I2V image cross-attn branch uses add_k_proj/add_v_proj in vllm-omni.
             name = name.replace(".cross_attn.k_img.", ".attn2.add_k_proj.")
             name = name.replace(".cross_attn.v_img.", ".attn2.add_v_proj.")
             name = name.replace(".cross_attn.norm_k_img.", ".attn2.norm_added_k.")
-            # modulation → scale_shift_table (only for blocks, not action module)
             if ".modulation." in name and "action_preprocess" not in name:
                 name = name.replace(".modulation.", ".scale_shift_table.")
-            # Scalar `blocks.N.modulation` (no trailing dot) → `blocks.N.scale_shift_table`
             if name.endswith(".modulation") and "action_preprocess" not in name:
                 name = name[: -len(".modulation")] + ".scale_shift_table"
-            # norm3 → norm2 (Wan2.1 block rename in diffusers port)
             name = name.replace(".norm3.", ".norm2.")
 
-            # Apply global remapping
             for old, new in weight_name_remapping:
                 name = name.replace(old, new)
 
             lookup_name = name
 
-            # Handle QKV fusion
             fused = False
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
@@ -475,13 +420,10 @@ class MicroWorldControlNetTransformer(WanTransformer3DModel):
                 break
 
             if not fused:
-                # ffn renaming: ffn.0 → ffn.net_0.proj, ffn.2 → ffn.net_2
-                # (ffn.0 is a Linear wrapped as GELU-activated FFN's first proj)
                 if ".ffn.0." in lookup_name:
                     lookup_name = lookup_name.replace(".ffn.0.", ".ffn.net_0.proj.")
                 elif ".ffn.2." in lookup_name:
                     lookup_name = lookup_name.replace(".ffn.2.", ".ffn.net_2.")
-                # diffusers-style ffn renaming
                 if ".ffn.net.0." in lookup_name:
                     lookup_name = lookup_name.replace(".ffn.net.0.", ".ffn.net_0.proj.")
                 elif ".ffn.net.2." in lookup_name:
@@ -559,14 +501,11 @@ class AdaLNWanTransformerBlock(WanTransformerBlock):
     ) -> torch.Tensor:
         if action_feat is not None and grid_sizes is not None:
             t, h, w = grid_sizes
-            # action_feat: [B, T, action_dim] → [B, T, 6*dim]
             modulation = self.action_adaLN_modulation(action_feat)
-            # Reshape: [B, T, 6, dim] → broadcast over H*W → [B, T*H*W, 6, dim]
             modulation = modulation.view(modulation.shape[0], t, 6, -1)
-            modulation = modulation.unsqueeze(2).unsqueeze(3)  # [B, T, 1, 1, 6, dim]
+            modulation = modulation.unsqueeze(2).unsqueeze(3)
             modulation = modulation.expand(-1, -1, h, w, -1, -1)
             modulation = modulation.reshape(modulation.shape[0], t * h * w, 6, -1)
-            # Ensure temb is 4D for addition
             if temb.ndim == 3:
                 temb = temb.unsqueeze(1).expand(-1, t * h * w, -1, -1)
             temb = temb + modulation
@@ -575,18 +514,7 @@ class AdaLNWanTransformerBlock(WanTransformerBlock):
 
 
 class MicroWorldAdaLNTransformer(WanTransformer3DModel):
-    """Wan Transformer with AdaLN action modulation for I2W generation.
-
-    Extends WanTransformer3DModel with:
-    - An ActionModule that preprocesses mouse/keyboard inputs (without spatial flatten)
-    - AdaLN modulation blocks that inject action features into timestep embeddings
-
-    Args:
-        action_dim: Dimension of action features (default 1536).
-        mouse_dim: Dimensionality of mouse input (default 2).
-        keyboard_dim: Dimensionality of keyboard input (default 7).
-        **kwargs (Any): Passed to WanTransformer3DModel.
-    """
+    """Wan transformer with AdaLN action modulation for I2W generation."""
 
     def __init__(
         self,
@@ -649,8 +577,10 @@ class MicroWorldAdaLNTransformer(WanTransformer3DModel):
         post_patch_width = width // p_w
         grid_sizes = (post_patch_num_frames, post_patch_height, post_patch_width)
 
-        # Compute RoPE embeddings
-        rotary_emb = self.rope(hidden_states)
+        # WanRotaryPosEmbed emits full head_dim via repeat_interleave(2); the
+        # pair-rotation kernel expects half head_dim, so take the even slice.
+        freqs_cos, freqs_sin = self.rope(hidden_states)
+        rotary_emb = (freqs_cos[..., 0::2], freqs_sin[..., 0::2])
 
         # Patch embedding and flatten to sequence
         hidden_states = self.patch_embedding(hidden_states)
@@ -711,10 +641,6 @@ class MicroWorldAdaLNTransformer(WanTransformer3DModel):
             shift = shift.unsqueeze(1)
             scale = scale.unsqueeze(1)
 
-        # ``norm_out`` is the fused ``AdaLayerNorm`` (post #2585): takes
-        # ``(x, scale, shift)`` and computes ``layernorm(x) * (1 + scale) + shift``
-        # internally. Pre-merge this was a plain LayerNorm and the modulation
-        # was applied here; that path is now handled inside the fused op.
         hidden_states = self.norm_out(hidden_states, scale, shift).type_as(hidden_states)
         hidden_states = self.proj_out(hidden_states)
 
@@ -779,29 +705,19 @@ class MicroWorldAdaLNTransformer(WanTransformer3DModel):
             name = name.replace(".cross_attn.o.", ".attn2.to_out.")
             name = name.replace(".cross_attn.norm_q.", ".attn2.norm_q.")
             name = name.replace(".cross_attn.norm_k.", ".attn2.norm_k.")
-            # Image cross-attention K/V (I2V variants only). vllm-omni's
-            # `WanCrossAttention` uses `add_k_proj`/`add_v_proj`/`norm_added_k`
-            # for the image branch, not `to_k_img`/`to_v_img`/`norm_k_img`.
+            # I2V image cross-attn branch uses add_k_proj/add_v_proj in vllm-omni.
             name = name.replace(".cross_attn.k_img.", ".attn2.add_k_proj.")
             name = name.replace(".cross_attn.v_img.", ".attn2.add_v_proj.")
             name = name.replace(".cross_attn.norm_k_img.", ".attn2.norm_added_k.")
 
-            # Apply explicit top-level remaps (e.g. ``head.modulation`` →
-            # top-level ``output_scale_shift_prepare.scale_shift_table``)
-            # BEFORE the per-block modulation fallback below, so we don't
-            # accidentally convert ``head.modulation`` into
-            # ``head.scale_shift_table``.
+            # Top-level remaps must run before the per-block modulation fallback.
             for old, new in weight_name_remapping.items():
                 name = name.replace(old, new)
 
             if ".modulation." in name and "action_preprocess" not in name and "action_adaLN" not in name:
                 name = name.replace(".modulation.", ".scale_shift_table.")
-            # Scalar ``blocks.N.modulation`` (no trailing dot) — Wan2.1
-            # stores it as a leaf parameter; map to ``scale_shift_table``.
             if name.endswith(".modulation") and "action_preprocess" not in name and "action_adaLN" not in name:
                 name = name[: -len(".modulation")] + ".scale_shift_table"
-            # ``norm3`` → ``norm2`` (Wan2.1 cross-attn pre-norm rename in
-            # diffusers port).
             name = name.replace(".norm3.", ".norm2.")
 
             lookup_name = name
@@ -821,13 +737,10 @@ class MicroWorldAdaLNTransformer(WanTransformer3DModel):
                 break
 
             if not fused:
-                # ffn renaming: ffn.0 → ffn.net_0.proj, ffn.2 → ffn.net_2
-                # (ffn.0 is a Linear wrapped as GELU-activated FFN's first proj)
                 if ".ffn.0." in lookup_name:
                     lookup_name = lookup_name.replace(".ffn.0.", ".ffn.net_0.proj.")
                 elif ".ffn.2." in lookup_name:
                     lookup_name = lookup_name.replace(".ffn.2.", ".ffn.net_2.")
-                # diffusers-style ffn renaming
                 if ".ffn.net.0." in lookup_name:
                     lookup_name = lookup_name.replace(".ffn.net.0.", ".ffn.net_0.proj.")
                 elif ".ffn.net.2." in lookup_name:

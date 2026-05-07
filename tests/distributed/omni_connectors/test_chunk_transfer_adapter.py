@@ -499,8 +499,8 @@ def test_generation_scheduler_calls_cleanup_on_finished(monkeypatch, mocker: Moc
         client_index=0,
         take_events=lambda: [],
         trace_headers=None,
-        num_cached_tokens=0,
-        num_external_computed_tokens=0,
+        has_encoder_inputs=False,
+        take_prefill_stats=lambda: None,
         num_nans_in_logits=0,
         get_finished_reason=lambda: "stop",
     )
@@ -580,8 +580,8 @@ def test_ar_scheduler_defers_cleanup_and_queues_save_on_finished(mocker: MockerF
         client_index=0,
         take_events=lambda: [],
         trace_headers=None,
-        num_cached_tokens=0,
-        num_external_computed_tokens=0,
+        has_encoder_inputs=False,
+        take_prefill_stats=lambda: None,
         num_nans_in_logits=0,
         get_finished_reason=lambda: "stop",
     )

@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from vllm_omni.data_entry_keys import OmniInputStruct, serialize_payload
+from vllm_omni.data_entry_keys import OmniInputStruct
 from vllm_omni.model_executor.stage_input_processors.tts_utils import (
     input_language_from_prompt,
     input_language_from_request,
@@ -12,8 +12,8 @@ from vllm_omni.model_executor.stage_input_processors.tts_utils import (
 
 
 def _build_request(input_struct: OmniInputStruct):
-    """Serialize an ``OmniInputStruct`` and wrap it as a request mock."""
-    return SimpleNamespace(additional_information=serialize_payload(input_struct))
+    """Wrap an ``OmniInputStruct`` as a request mock."""
+    return SimpleNamespace(additional_information=input_struct)
 
 
 def test_extractors_read_from_wire_round_trip():

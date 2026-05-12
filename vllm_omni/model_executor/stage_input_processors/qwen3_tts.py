@@ -172,21 +172,12 @@ def talker2code2wav_async_chunk(
 
     if additional_information is not None:
         from vllm_omni.data_entry_keys import OmniInputStruct
-        from vllm_omni.engine import AdditionalInformationPayload
 
-        override = None
         if isinstance(additional_information, OmniInputStruct):
             override = additional_information.initial_codec_chunk_frames
-        elif (
-            isinstance(additional_information, AdditionalInformationPayload)
-            and "initial_codec_chunk_frames" in additional_information.entries
-        ):
-            entry = additional_information.entries["initial_codec_chunk_frames"]
-            if entry.list_data is not None and len(entry.list_data) == 1:
-                override = entry.list_data[0]
-        if override is not None:
-            initial_chunk_size = int(override)
-            fixed_initial_chunk_size = True
+            if override is not None:
+                initial_chunk_size = int(override)
+                fixed_initial_chunk_size = True
 
     # Dynamic IC: cache per request so boundaries stay stable for its lifetime.
     if not fixed_initial_chunk_size:

@@ -10,40 +10,19 @@ processor (qwen3_omni, qwen2_5_omni, qwen3_tts, etc.).
 from typing import Any
 
 from vllm_omni.data_entry_keys import OmniInputStruct
-from vllm_omni.engine import AdditionalInformationEntry, AdditionalInformationPayload
 
 # =============================================================================
-# Read from ``OmniInputStruct`` — used by producers migrated to emit
-# ``OmniInputStruct(...)`` directly on ``additional_information``. The wire
-# flattens its scalar fields at top level (no ``input.`` prefix) and its
-# per-model substructs under their model name (e.g. ``qwen3_tts.task_type``).
-# Legacy extractors below still read top-level keys for unmigrated producers
-# that emit a free dict.
+# Read from ``OmniInputStruct`` — producers emit ``OmniInputStruct(...)``
+# directly on ``additional_information``. Per-model substructs live under
+# their model name (e.g. ``qwen3_tts.task_type``).
 # =============================================================================
-
-
-def _entry_value(entries: dict[str, AdditionalInformationEntry] | None, field: str) -> Any:
-    if not entries:
-        return None
-    entry = entries.get(field)
-    if entry is None:
-        return None
-    return entry.list_data if entry.list_data is not None else entry.scalar_data
 
 
 def input_field_from_request(request: Any, field: str) -> Any:
-    """Read a top-level ``OmniInputStruct`` field from a request's wire envelope.
-
-    Returns the raw entry value (list for list-typed fields, scalar otherwise)
-    or ``None`` if not present.
-    """
+    """Read a top-level ``OmniInputStruct`` field from the request envelope."""
     add_info = getattr(request, "additional_information", None)
-    if add_info is None:
-        return None
     if isinstance(add_info, OmniInputStruct):
         return getattr(add_info, field, None)
-    if isinstance(add_info, AdditionalInformationPayload):
-        return _entry_value(add_info.entries, field)
     return None
 
 

@@ -941,8 +941,8 @@ class OmniGPUModelRunner(GPUModelRunner):
         return hidden_states, hidden_states[logit_indices_device]
 
     # ------------------------------------------------------------------
-    # Payload decoding helpers (torch.Tensor passthrough + legacy
-    # PromptEmbedsPayload / AdditionalInformationPayload support)
+    # Payload decoding helpers (torch.Tensor passthrough +
+    # PromptEmbedsPayload support)
     # ------------------------------------------------------------------
 
     @staticmethod

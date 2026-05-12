@@ -1771,7 +1771,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         if voice is not None:
             tokens = self._tts_tokenizer.encode_speech_request(SpeechRequest(input=text, voice=voice)).tokens
             prompt = tokens_input(prompt_token_ids=tokens)
-            prompt["additional_information"] = {"voice": [voice]}
+            prompt["additional_information"] = OmniInputStruct(voice=[voice])
             return prompt
         else:
             tokenized = self._tts_tokenizer.encode_speech_request(SpeechRequest(input=text, ref_audio=ref_audio))

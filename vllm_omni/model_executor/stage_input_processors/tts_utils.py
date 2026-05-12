@@ -37,10 +37,14 @@ def input_field_from_request(request: Any, field: str) -> Any:
     Returns the raw entry value (list for list-typed fields, scalar otherwise)
     or ``None`` if not present.
     """
-    add_info: AdditionalInformationPayload | None = getattr(request, "additional_information", None)
+    add_info = getattr(request, "additional_information", None)
     if add_info is None:
         return None
-    return _entry_value(add_info.entries, field)
+    if isinstance(add_info, OmniInputStruct):
+        return getattr(add_info, field, None)
+    if isinstance(add_info, AdditionalInformationPayload):
+        return _entry_value(add_info.entries, field)
+    return None
 
 
 def _input_struct(prompt: dict[str, Any] | list[dict[str, Any]] | None, index: int) -> OmniInputStruct | None:
@@ -54,10 +58,7 @@ def _input_struct(prompt: dict[str, Any] | list[dict[str, Any]] | None, index: i
 
 
 def input_speaker_from_request(request: Any) -> str | None:
-    add_info: AdditionalInformationPayload | None = getattr(request, "additional_information", None)
-    if add_info is None:
-        return None
-    val = _entry_value(add_info.entries, "speaker")
+    val = input_field_from_request(request, "speaker")
     if isinstance(val, list) and val:
         val = val[0]
     if isinstance(val, str) and val.strip():
@@ -66,10 +67,7 @@ def input_speaker_from_request(request: Any) -> str | None:
 
 
 def input_language_from_request(request: Any) -> list[str] | None:
-    add_info: AdditionalInformationPayload | None = getattr(request, "additional_information", None)
-    if add_info is None:
-        return None
-    val = _entry_value(add_info.entries, "language")
+    val = input_field_from_request(request, "language")
     if isinstance(val, list) and val:
         return val
     if isinstance(val, str) and val.strip():

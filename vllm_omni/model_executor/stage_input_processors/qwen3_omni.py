@@ -23,10 +23,10 @@ from vllm_omni.data_entry_keys import (
 from vllm_omni.engine import OmniEngineCoreRequest
 from vllm_omni.inputs.data import OmniTokensPrompt
 from vllm_omni.model_executor.stage_input_processors.tts_utils import (
-    extract_language_from_prompt,
-    extract_language_from_request,
-    extract_speaker_from_prompt,
-    extract_speaker_from_request,
+    input_language_from_prompt,
+    input_language_from_request,
+    input_speaker_from_prompt,
+    input_speaker_from_request,
 )
 
 logger = logging.getLogger(__name__)
@@ -314,8 +314,8 @@ def thinker2talker_async_chunk(
             thinker_hid is not None,
         )
         return None
-    speaker = extract_speaker_from_request(request)
-    language = extract_language_from_request(request)
+    speaker = input_speaker_from_request(request)
+    language = input_language_from_request(request)
 
     def _maybe_cpu(t: Any) -> torch.Tensor | None:
         return t.detach().cpu() if isinstance(t, torch.Tensor) else None
@@ -461,8 +461,8 @@ def thinker2talker(
             ),
             hidden_states=HiddenStatesStruct(output=thinker_hid),
             ids=IdsStruct(all=thinker_sequences, prompt=thinker_input_ids),
-            speaker=extract_speaker_from_prompt(prompt, index=i),
-            language=extract_language_from_prompt(prompt, index=i),
+            speaker=input_speaker_from_prompt(prompt, index=i),
+            language=input_language_from_prompt(prompt, index=i),
         )
         prompt_len = _compute_talker_prompt_ids_length(payload, device=device)
 

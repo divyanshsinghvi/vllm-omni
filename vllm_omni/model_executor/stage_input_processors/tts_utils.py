@@ -31,6 +31,18 @@ def _entry_value(entries: dict[str, AdditionalInformationEntry] | None, field: s
     return entry.list_data if entry.list_data is not None else entry.scalar_data
 
 
+def input_field_from_request(request: Any, field: str) -> Any:
+    """Read a top-level ``OmniInputStruct`` field from a request's wire envelope.
+
+    Returns the raw entry value (list for list-typed fields, scalar otherwise)
+    or ``None`` if not present.
+    """
+    add_info: AdditionalInformationPayload | None = getattr(request, "additional_information", None)
+    if add_info is None:
+        return None
+    return _entry_value(add_info.entries, field)
+
+
 def _input_struct(prompt: dict[str, Any] | list[dict[str, Any]] | None, index: int) -> OmniInputStruct | None:
     if prompt is None:
         return None

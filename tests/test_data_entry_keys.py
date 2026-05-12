@@ -393,6 +393,28 @@ class TestOmniInputStruct:
         with pytest.raises(msgspec.ValidationError):
             msgspec.convert({"qwen3_tts": {"not_a_real_field": 1}}, OmniInputStruct)
 
+    def test_encode_decode_struct_native_round_trip(self):
+        """``encode_struct``/``decode_struct`` preserve nested struct + tensor data."""
+        from vllm_omni.data_entry_keys import (
+            CodesStruct,
+            MetaStruct,
+            OmniPayloadStruct,
+            decode_struct,
+            encode_struct,
+        )
+
+        original = OmniPayloadStruct(
+            codes=CodesStruct(audio=torch.tensor([1.0, 2.0, 3.0])),
+            meta=MetaStruct(left_context_size=7, finished=torch.tensor(True, dtype=torch.bool)),
+        )
+        data = encode_struct(original)
+        assert isinstance(data, bytes) and len(data) > 0
+        restored = decode_struct(data, OmniPayloadStruct)
+        assert restored.meta.left_context_size == 7
+        assert restored.meta.finished.dtype == torch.bool
+        assert restored.meta.finished.item() is True
+        assert torch.equal(restored.codes.audio, original.codes.audio)
+
     def test_input_struct_wire_round_trip(self):
         """``OmniInputStruct`` serializes to flat top-level entries (no ``input.`` prefix)."""
         from vllm_omni.data_entry_keys import OmniInputStruct, Qwen3TTSInputStruct

@@ -270,6 +270,36 @@ def _msgspec_dec_hook(typ: type, obj: Any) -> Any:
     raise NotImplementedError(f"no decoder for {typ}")
 
 
+def _msgspec_enc_hook(obj: Any) -> Any:
+    """Bridge non-msgspec types when encoding Structs to msgpack bytes."""
+    if isinstance(obj, torch.Tensor):
+        t_cpu = obj.detach().to("cpu").contiguous()
+        return {
+            _TENSOR_MARKER: True,
+            "data": t_cpu.numpy().tobytes(),
+            "dtype": _dtype_to_name(t_cpu.dtype),
+            "shape": list(t_cpu.shape),
+        }
+    raise NotImplementedError(f"no encoder for {type(obj).__name__}")
+
+
+_T = OmniPayloadStruct | OmniInputStruct
+
+
+def encode_struct(struct: _T) -> bytes:
+    """Encode an ``OmniPayloadStruct`` / ``OmniInputStruct`` to msgpack bytes.
+
+    Tensors are encoded inline via :func:`_msgspec_enc_hook` (zero-copy on the
+    bytes payload; the dtype/shape come along as metadata).
+    """
+    return msgspec.msgpack.encode(struct, enc_hook=_msgspec_enc_hook)
+
+
+def decode_struct(data: bytes, typ: type[_T]) -> _T:
+    """Decode msgpack bytes back into ``typ`` (``OmniPayloadStruct`` etc)."""
+    return msgspec.msgpack.decode(data, type=typ, dec_hook=_msgspec_dec_hook)
+
+
 def to_struct(payload: dict[str, Any]) -> OmniPayloadStruct:
     """Convert a payload dict into ``OmniPayloadStruct``, validating types.
 

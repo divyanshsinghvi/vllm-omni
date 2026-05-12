@@ -22,6 +22,7 @@ from vllm.v1.worker.gpu_model_runner import GPUModelRunner, IntermediateTensors,
 from vllm.v1.worker.ubatch_utils import maybe_create_ubatch_slices
 
 from vllm_omni.core.prefix_cache import OmniTensorPrefixCache
+from vllm_omni.data_entry_keys import OmniInputStruct, OmniPayloadStruct, to_input_struct, to_struct
 from vllm_omni.engine.serialization import deserialize_additional_information
 from vllm_omni.model_executor.layers.rotary_embedding.mrope import OmniMRotaryEmbedding as MRotaryEmbedding
 from vllm_omni.model_executor.models.output_templates import OmniOutput
@@ -1024,6 +1025,33 @@ class OmniGPUModelRunner(GPUModelRunner):
                 per_req_runtime_info.append({})
         return per_req_runtime_info
 
+    def _gather_runtime_additional_information_struct(
+        self,
+        buffer_map: list[dict],
+    ) -> tuple[list[OmniPayloadStruct], list[OmniInputStruct | None]]:
+        """Project each buffer dict into typed ``OmniPayloadStruct`` (stage-output
+        fields) and ``OmniInputStruct`` (input fields) lists.
+
+        For first-stage models the buffer mixes input + stage outputs. Splitting
+        by schema lets each consumer read the typed slice it needs. Conversion
+        errors propagate — they indicate a field present in the dict that fits
+        neither schema (real producer/schema mismatch worth fixing).
+        """
+        payload_fields = set(OmniPayloadStruct.__struct_fields__)
+        input_fields = set(OmniInputStruct.__struct_fields__)
+        payload_list: list[OmniPayloadStruct] = []
+        input_list: list[OmniInputStruct | None] = []
+        for info in buffer_map:
+            if not info:
+                payload_list.append(OmniPayloadStruct())
+                input_list.append(None)
+                continue
+            p_dict = {k: v for k, v in info.items() if k in payload_fields}
+            i_dict = {k: v for k, v in info.items() if k in input_fields}
+            payload_list.append(to_struct(p_dict) if p_dict else OmniPayloadStruct())
+            input_list.append(to_input_struct(i_dict) if i_dict else None)
+        return payload_list, input_list
+
     def _compute_request_token_spans(self, num_scheduled_tokens_np) -> list[tuple[int, int]]:
         """Compute (start, end) token spans for each request within the flattened step sequence."""
         req_token_spans: list[tuple[int, int]] = []
@@ -1041,6 +1069,12 @@ class OmniGPUModelRunner(GPUModelRunner):
             model_kwargs_extra["model_intermediate_buffer"] = buffer_map
             # Backward compatible: also emit old name
             model_kwargs_extra["runtime_additional_information"] = buffer_map
+            # Typed views for migrated consumers (3a.2b): payload-shaped struct
+            # for stage-output reads, input-shaped struct for input-side reads.
+            (
+                model_kwargs_extra["model_intermediate_buffer_struct"],
+                model_kwargs_extra["model_input_struct"],
+            ) = self._gather_runtime_additional_information_struct(buffer_map)
         except Exception as e:
             logger.error(f"[OMNI DEBUG] Error building model_kwargs_extra: {e}")
             import traceback

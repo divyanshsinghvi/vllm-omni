@@ -346,6 +346,11 @@ def decode_struct(data: bytes, typ: type[_T]) -> _T:
     return msgspec.msgpack.decode(data, type=typ, dec_hook=_msgspec_dec_hook)
 
 
+def to_input_struct(payload: dict[str, Any]) -> OmniInputStruct:
+    """Convert a payload dict into ``OmniInputStruct``, validating types."""
+    return msgspec.convert(payload, OmniInputStruct, dec_hook=_msgspec_dec_hook)
+
+
 def to_struct(payload: dict[str, Any]) -> OmniPayloadStruct:
     """Convert a payload dict into ``OmniPayloadStruct``, validating types.
 

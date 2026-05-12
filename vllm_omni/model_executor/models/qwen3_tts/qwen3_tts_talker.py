@@ -26,7 +26,7 @@ from vllm.model_executor.models.utils import AutoWeightsLoader, PPMissingLayer, 
 from vllm.multimodal.audio import AudioResampler
 from vllm.sequence import IntermediateTensors
 
-from vllm_omni.data_entry_keys import OmniPayload
+from vllm_omni.data_entry_keys import OmniPayload, OmniPayloadStruct
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 from vllm_omni.utils.audio import mel_filter_bank
 from vllm_omni.utils.speaker_cache import get_speaker_cache
@@ -477,32 +477,26 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
             return model_outputs
 
         hidden = model_outputs
-        info_dicts = kwargs.get("model_intermediate_buffer")
-        if info_dicts is None:
-            info_dicts = kwargs.get("runtime_additional_information") or []
-        if "runtime_additional_information" in kwargs and "model_intermediate_buffer" not in kwargs:
-            logger.warning_once("runtime_additional_information is deprecated, use model_intermediate_buffer")
+        info_structs: list[OmniPayloadStruct] = kwargs.get("model_intermediate_buffer_struct") or []
         audio_codes_list: list[torch.Tensor] = []
         ref_code_len_list: list[torch.Tensor] = []
         ref_code_tensor: torch.Tensor | None = None
         codec_streaming_list: list[torch.Tensor] = []
-        for info in info_dicts:
-            if not isinstance(info, dict):
-                continue
-            codes = info.get("codes", {})
-            meta = info.get("meta", {})
-            ac = codes.get("audio")
+        for info in info_structs:
+            codes_struct = info.codes
+            meta_struct = info.meta
+            ac = codes_struct.audio if codes_struct is not None else None
             if isinstance(ac, torch.Tensor):
                 audio_codes_list.append(ac)
-                cs = meta.get("codec_streaming")
+                cs = meta_struct.codec_streaming if meta_struct is not None else None
                 if isinstance(cs, bool):
                     codec_streaming_list.append(
                         torch.full((int(ac.shape[0]),), int(cs), dtype=torch.int8, device=ac.device)
                     )
-            ref_code = codes.get("ref")
+            ref_code = codes_struct.ref if codes_struct is not None else None
             if isinstance(ref_code, torch.Tensor) and ref_code.numel() > 0:
                 ref_code_tensor = ref_code
-            ref_len = meta.get("ref_code_len")
+            ref_len = meta_struct.ref_code_len if meta_struct is not None else None
             if ref_len is None:
                 continue
             if isinstance(ref_len, torch.Tensor):

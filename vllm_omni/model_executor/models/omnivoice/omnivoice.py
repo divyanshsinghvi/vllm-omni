@@ -357,7 +357,7 @@ class OmniVoiceModel(
 
         if not hasattr(self, "_duration_estimator"):
             self._duration_estimator = RuleDurationEstimator()
-        raw_text = info.get("raw_text", "")
+        raw_text = info.get("text", "")
         if raw_text:
             target_len = self._duration_estimator.estimate_duration(raw_text, "Nice to meet you.", 25)
             target_len = max(1, int(target_len))

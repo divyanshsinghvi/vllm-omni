@@ -33,6 +33,7 @@ from vllm.model_executor.models.utils import (
 from vllm.multimodal.audio import AudioResampler
 from vllm.sequence import IntermediateTensors
 
+from vllm_omni.data_entry_keys import OmniInputStruct, VoxCPM2InputStruct
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 from vllm_omni.utils.speaker_cache import get_speaker_cache
 
@@ -108,23 +109,27 @@ def build_voxcpm2_prompt(
     if ids and ids[0] == bos:
         ids = ids[1:]
     prefill_len = len(ids) + 1  # + audio_start
-    additional: dict[str, Any] = {"text_token_ids": [ids]}
+    voxcpm2 = VoxCPM2InputStruct(text_token_ids=[ids])
+    omni_input = OmniInputStruct(voxcpm2=voxcpm2)
     if ref_audio is not None:
         vae = hf_config.audio_vae_config
         patch_samples = hf_config.patch_size * math.prod(vae["encoder_rates"])
         ref_len = math.ceil(math.ceil(len(ref_audio) * vae["sample_rate"] / ref_sr) / patch_samples)
         if ref_text is not None:
-            additional["prompt_audio"] = [[ref_audio, ref_sr]]
-            additional["prompt_text"] = [ref_text]
+            # Voice clone with reference text: paired audio lives on the
+            # voxcpm2 substruct (consumer branches on its presence).
+            voxcpm2.prompt_audio = [[ref_audio, ref_sr]]
+            omni_input.prompt_text = [ref_text]
             ref_ids = split_multichar_chinese(tokenizer.encode(ref_text, add_special_tokens=True), split_map)
             if ref_ids and ref_ids[0] == bos:
                 ref_ids = ref_ids[1:]
             prefill_len += ref_len + len(ref_ids)
         else:
-            additional["reference_audio"] = [[ref_audio, ref_sr]]
+            # Continuation mode: use cross-model ``ref_audio`` slot.
+            omni_input.ref_audio = [[ref_audio, ref_sr]]
             prefill_len += ref_len + 2  # ref_start / ref_end
     prompt = tokens_input(prompt_token_ids=[1] * prefill_len)
-    prompt["additional_information"] = additional
+    prompt["additional_information"] = omni_input
     return prompt
 
 
@@ -1125,12 +1130,16 @@ class VoxCPM2TalkerForConditionalGeneration(nn.Module):
         req_id = info_dict.get("request_id", "default")
         is_prefill = span_len > 1
 
+        # VoxCPM2-specific params live under ``OmniInputStruct.voxcpm2`` after
+        # the input migration; ``info_dict`` is the deserialized dict view.
+        voxcpm2_info = info_dict.get("voxcpm2") or {}
+
         if is_prefill:
             # Do not evict state here: _pending_requests is a per-step prefix,
             # not the full batch. Cleanup is driven by on_requests_finished ->
             # _flush_deferred_cleanup (fed by vLLM scheduler._free_request via
             # gpu_ar_model_runner.py).
-            real = info_dict.get("text_token_ids")
+            real = voxcpm2_info.get("text_token_ids")
             token_ids = input_ids.tolist() if real is None else real[0]
             # Fail-fast: unsplit multichar Chinese IDs in input_ids means the
             # serving layer didn't pre-split.  Silent fixup here would cause
@@ -1158,8 +1167,8 @@ class VoxCPM2TalkerForConditionalGeneration(nn.Module):
             state.is_stopping = False
 
             # Voice clone / continuation
-            ref_audio = info_dict.get("reference_audio") or info_dict.get("ref_audio")
-            prompt_audio = info_dict.get("prompt_audio")
+            ref_audio = info_dict.get("ref_audio")
+            prompt_audio = voxcpm2_info.get("prompt_audio")
             prompt_text = info_dict.get("prompt_text")
             if isinstance(ref_audio, list):
                 ref_audio = ref_audio[0] if ref_audio else None

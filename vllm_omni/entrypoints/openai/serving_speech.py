@@ -2080,9 +2080,9 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             tts_params = {}
             if request.voice:
                 voice_lower = request.voice.lower()
-                additional = prompt.setdefault("additional_information", {})
-                additional["voice_name"] = voice_lower
-                additional["voice_created_at"] = self._voice_created_at(voice_lower)
+                additional: OmniInputStruct = prompt["additional_information"]
+                additional.voice_name = voice_lower
+                additional.voice_created_at = self._voice_created_at(voice_lower)
         elif self._is_tts:
             validation_error = self._validate_tts_request(request)
             if validation_error:

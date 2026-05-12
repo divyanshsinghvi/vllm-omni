@@ -269,7 +269,7 @@ class MossTTSNanoForGeneration(nn.Module):
         # (wav_list, sample_rate) so we can avoid re-decoding base64 and the
         # model owns temp-file lifecycle.
         prompt_audio_array = _pick(moss, "prompt_audio_array", None)
-        prompt_text: str | None = _pick(moss, "prompt_text", None)
+        prompt_text: str | None = _pick(info, "prompt_text", None)
         if prompt_text is not None:
             prompt_text = str(prompt_text)
         max_new_frames: int = int(_pick(moss, "max_new_frames", _DEFAULT_MAX_NEW_FRAMES))

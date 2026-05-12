@@ -166,12 +166,6 @@ class MetaStruct(_StructBase):
     omni_final_stage_id: int | None = None
 
 
-class RefAudioStruct(_StructBase):
-    samples: torch.Tensor | None = None
-    sample_rate: int | None = None
-    text: str | None = None
-
-
 class VoiceClonePromptStruct(_StructBase):
     """Inline speaker embedding payload used by qwen3_tts x-vector clone."""
 
@@ -193,7 +187,6 @@ class MossTTSInputStruct(_StructBase):
     mode: str | list[str] | None = None
     prompt_audio_path: str | list[str] | None = None
     prompt_audio_array: list[Any] | None = None  # [[wav_list, sr]] shape
-    prompt_text: str | list[str] | None = None
     max_new_frames: int | list[int] | None = None
     seed: int | list[int] | None = None
     text_temperature: float | list[float] | None = None
@@ -218,7 +211,6 @@ class MingTTSInputStruct(_StructBase):
     max_decode_steps: int | None = None  # alias used by serving_speech
     use_static_cache: bool | None = None
     stream_decode: bool | None = None
-    prompt_text: str | None = None
     prompt_wav_lat: torch.Tensor | None = None
     prompt_wav_emb: torch.Tensor | None = None
 
@@ -238,19 +230,16 @@ class VoxCPMInputStruct(_StructBase):
     retry_badcase_max_times: int | list[int] | None = None
     retry_badcase_ratio_threshold: float | list[float] | None = None
     streaming_prefix_len: int | list[int] | None = None
-    prompt_text: str | list[str] | None = None
     prompt_wav_path: str | list[str] | None = None
     latent_audio_feat: torch.Tensor | None = None  # stage-runtime carry-over
 
 
 class VoxCPM2InputStruct(_StructBase):
     text_token_ids: list[list[int]] | None = None
-    prompt_audio: list[Any] | None = None  # [[ref_audio, ref_sr]]
-    reference_audio: list[Any] | None = None  # [[ref_audio, ref_sr]]
+    prompt_audio: list[Any] | None = None  # [[ref_audio, ref_sr]] when paired with prompt_text
 
 
 class OmniVoiceInputStruct(_StructBase):
-    raw_text: str | None = None
     ref_audio_tokens: torch.Tensor | None = None
 
 
@@ -263,8 +252,9 @@ class OmniInputStruct(_StructBase):
     voice: str | list[str] | None = None
     voice_name: str | list[str] | None = None
     voice_created_at: int | list[int] | None = None
-    ref_audio: list[RefAudioStruct] | None = None
+    ref_audio: list[Any] | None = None  # [[wav, sr]] list-of-pair shape used by TTS producers
     ref_text: str | list[str] | None = None
+    prompt_text: str | list[str] | None = None
     initial_codec_chunk_frames: int | None = None
     qwen3_tts: Qwen3TTSInputStruct | None = None
     moss: MossTTSInputStruct | None = None

@@ -232,7 +232,6 @@ class VoxCPMInputStruct(_StructBase):
     retry_badcase_ratio_threshold: float | list[float] | None = None
     streaming_prefix_len: int | list[int] | None = None
     prompt_wav_path: str | list[str] | None = None
-    latent_audio_feat: torch.Tensor | None = None  # stage-runtime carry-over
 
 
 class VoxCPM2InputStruct(_StructBase):
@@ -292,6 +291,7 @@ class OmniPayloadStruct(_StructBase):
     request_id: str | None = None
     past_key_values: list[int] | None = None
     kv_metadata: dict[str, Any] | None = None
+    latent_audio_feat: torch.Tensor | None = None  # voxcpm AR→VAE carry-over
 
 
 _NESTED_STRUCTS: dict[str, type[_StructBase]] = {

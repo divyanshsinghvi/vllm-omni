@@ -38,7 +38,7 @@ from vllm.v1.worker.gpu_model_runner import (
 from vllm.v1.worker.ubatch_utils import maybe_create_ubatch_slices
 from vllm.v1.worker.utils import is_residual_scattered_for_sp
 
-from vllm_omni.data_entry_keys import flatten_payload
+from vllm_omni.data_entry_keys import OmniPayloadStruct, flatten_payload
 from vllm_omni.distributed.omni_connectors.kv_transfer_manager import OmniKVTransferManager
 from vllm_omni.outputs import OmniModelRunnerOutput
 from vllm_omni.utils.mm_outputs import build_mm_cpu, to_payload_element
@@ -253,9 +253,13 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
         if self.omni_prefix_cache is not None and get_pp_group().is_last_rank:
             # If this happens, it generally means the model is not following the correct
             # interface yet and is therefore currently not compatible with prefix cache.
-            if multimodal_outputs is not None and not isinstance(multimodal_outputs, dict):
+            if (
+                multimodal_outputs is not None
+                and not isinstance(multimodal_outputs, dict)
+                and not isinstance(multimodal_outputs, OmniPayloadStruct)
+            ):
                 logger.warning_once(
-                    "prefix caching expects mm outputs to be a dict, but got %s",
+                    "prefix caching expects mm outputs to be a dict or OmniPayloadStruct, but got %s",
                     type(multimodal_outputs),
                 )
 

@@ -19,7 +19,6 @@ from vllm_omni.data_entry_keys import (
     MetaStruct,
     OmniPayload,
     OmniPayloadStruct,
-    to_dict,
 )
 from vllm_omni.engine import OmniEngineCoreRequest
 from vllm_omni.inputs.data import OmniTokensPrompt
@@ -48,16 +47,16 @@ def _layer_tensor(layers: dict[Any, Any], key: str) -> torch.Tensor | None:
     return val if isinstance(val, torch.Tensor) else None
 
 
-def _compute_talker_prompt_ids_length(info: OmniPayload, device: torch.device | str = "cuda") -> int:
+def _compute_talker_prompt_ids_length(info: OmniPayloadStruct, device: torch.device | str = "cuda") -> int:
     im_start_token_id = 151644
     system_token_id = 8948
     user_token_id = 872
     assistant_token_id = 77091
 
-    ids = info.get("ids", {})
-    thinker_sequences = torch.tensor(ids["all"], dtype=torch.long, device=device).unsqueeze(0)  # [1, T]
+    ids = info.ids
+    thinker_sequences = torch.tensor(ids.all, dtype=torch.long, device=device).unsqueeze(0)  # [1, T]
 
-    input_ids = torch.tensor(ids["prompt"], dtype=torch.long, device=device).unsqueeze(0)  # [1, T]
+    input_ids = torch.tensor(ids.prompt, dtype=torch.long, device=device).unsqueeze(0)  # [1, T]
 
     im_start_indexes = torch.cat(
         [
@@ -465,13 +464,12 @@ def thinker2talker(
             speaker=extract_speaker_from_prompt(prompt, index=i),
             language=extract_language_from_prompt(prompt, index=i),
         )
-        info = to_dict(payload)
-        prompt_len = _compute_talker_prompt_ids_length(info, device=device)
+        prompt_len = _compute_talker_prompt_ids_length(payload, device=device)
 
         talker_inputs.append(
             OmniTokensPrompt(
                 prompt_token_ids=[0] * prompt_len,
-                additional_information=info,
+                additional_information=payload,
                 multi_modal_data=None,
                 mm_processor_kwargs=None,
             )

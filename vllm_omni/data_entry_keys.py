@@ -277,14 +277,16 @@ def _dtype_to_name(dtype: torch.dtype) -> str:
 _NESTED_KEYS = frozenset({"hidden_states", "embed", "ids", "codes", "meta"})
 
 
-def flatten_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Flatten a nested ``OmniPayload`` to dotted keys.
+def flatten_payload(payload: dict[str, Any] | OmniPayloadStruct) -> dict[str, Any]:
+    """Flatten a nested ``OmniPayload`` (dict or struct) to dotted keys.
 
-    Nested sub-dicts under ``_NESTED_KEYS`` are expanded:
+    Nested sub-dicts/sub-structs under ``_NESTED_KEYS`` are expanded:
     ``{"codes": {"audio": tensor}}`` → ``{"codes.audio": tensor}``.
     ``hidden_states["layers"]`` is expanded to ``hidden_states.layer_N``.
     Top-level values are kept as-is.
     """
+    if isinstance(payload, _StructBase):
+        payload = to_dict(payload)
     if not payload:
         return {}
     flat: dict[str, Any] = {}
@@ -342,7 +344,7 @@ def _deserialize_tensor(entry: AdditionalInformationEntry) -> torch.Tensor:
 
 
 def serialize_payload(
-    payload: OmniPayload,
+    payload: OmniPayload | OmniPayloadStruct,
 ) -> AdditionalInformationPayload | None:
     """Serialize an ``OmniPayload`` for EngineCore transport.
 

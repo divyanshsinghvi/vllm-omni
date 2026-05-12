@@ -32,7 +32,7 @@ from vllm.v1.outputs import SamplerOutput
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler
 
-from vllm_omni.data_entry_keys import EmbeddingsStruct, OmniPayloadStruct, to_dict, to_struct
+from vllm_omni.data_entry_keys import EmbeddingsStruct, OmniPayloadStruct, to_struct
 from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
 from vllm_omni.model_executor.models.cosyvoice3.utils import (
     concat_text_with_prompt_ids,
@@ -676,14 +676,12 @@ class CosyVoice3Model(
             if "speech_token" in kwargs:
                 # Prompt conditioning tensors for code2wav: live under
                 # ``embed.*`` per OmniPayloadStruct schema.
-                multimodal_outputs = to_dict(
-                    OmniPayloadStruct(
-                        embed=EmbeddingsStruct(
-                            speech_token=kwargs.get("speech_token"),
-                            speech_feat=kwargs.get("speech_feat"),
-                            embedding=kwargs.get("embedding"),
-                        ),
-                    )
+                multimodal_outputs = OmniPayloadStruct(
+                    embed=EmbeddingsStruct(
+                        speech_token=kwargs.get("speech_token"),
+                        speech_feat=kwargs.get("speech_feat"),
+                        embedding=kwargs.get("embedding"),
+                    ),
                 )
 
             return OmniOutput(text_hidden_states=hidden_states, multimodal_outputs=multimodal_outputs)

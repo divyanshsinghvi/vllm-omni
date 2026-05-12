@@ -378,8 +378,9 @@ class FishSpeechSlowARForConditionalGeneration(nn.Module):
             is_first_prefill = not isinstance(prompt_embeds_buf, torch.Tensor) or prompt_embeds_buf.ndim != 2
             dev = input_ids.device
 
+            fish_speech_info = info_dict.get("fish_speech") or {}
             if is_first_prefill:
-                if bool(info_dict.get("fish_structured_voice_clone", False)):
+                if bool(fish_speech_info.get("fish_structured_voice_clone", False)):
                     prompt_embeds = self._build_structured_voice_clone_prefill_embeds(info_dict)
                 else:
                     prompt_embeds = self._build_prefill_embeds(input_ids, info_dict)
@@ -533,9 +534,10 @@ class FishSpeechSlowARForConditionalGeneration(nn.Module):
 
     def _build_structured_voice_clone_prefill_embeds(self, info_dict: dict[str, Any]) -> torch.Tensor:
         tokenizer = self._get_tokenizer()
+        fish_speech_info = info_dict.get("fish_speech") or {}
         ref_text = info_dict.get("ref_text")
         text = info_dict.get("text")
-        ref_audio_sr = info_dict.get("ref_audio_sr")
+        ref_audio_sr = fish_speech_info.get("ref_audio_sr")
         if not isinstance(ref_text, str) or not isinstance(text, str):
             raise ValueError("Fish Speech structured voice clone requires string text and ref_text")
 
@@ -564,7 +566,7 @@ class FishSpeechSlowARForConditionalGeneration(nn.Module):
         if not isinstance(ref_audio_sr, int):
             raise ValueError("Fish Speech structured voice clone requires integer ref_audio_sr")
 
-        ref_audio_wav_raw = info_dict.get("ref_audio_wav")
+        ref_audio_wav_raw = fish_speech_info.get("ref_audio_wav")
         if ref_audio_wav_raw is None:
             raise ValueError("Fish Speech structured voice clone requires ref_audio_wav")
         if isinstance(ref_audio_wav_raw, torch.Tensor):

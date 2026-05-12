@@ -31,7 +31,7 @@ from vllm.utils import random_uuid
 from vllm.utils.async_utils import make_async
 from vllm.v1.engine.exceptions import EngineDeadError, EngineGenerateError
 
-from vllm_omni.data_entry_keys import MossTTSInputStruct, OmniInputStruct
+from vllm_omni.data_entry_keys import FishSpeechInputStruct, MossTTSInputStruct, OmniInputStruct
 from vllm_omni.entrypoints.openai.audio_utils_mixin import AudioMixin
 from vllm_omni.entrypoints.openai.protocol.audio import (
     AudioResponse,
@@ -1809,15 +1809,10 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         if ref_audio_data is None or not request.ref_text:
             prompt_ids, normalized_text = build_fish_text_only_prompt_ids(tokenizer, request.input)
 
-            # Keep the prompt-dict metadata shape aligned with the existing text-only
-            # TTS entrypoints: scalar values are wrapped in single-item lists before
-            # EngineCore serialization. Structured clone below is different because
-            # model-side preprocess consumes concrete per-request scalar fields.
-            additional_information: dict[str, Any] = {
-                "text": [normalized_text],
-            }
+            # Text-only branch: list-wrapped scalars (engine-wire convention).
+            additional_information = OmniInputStruct(text=[normalized_text])
             if request.max_new_tokens is not None:
-                additional_information["max_new_tokens"] = [request.max_new_tokens]
+                additional_information.max_new_tokens = [request.max_new_tokens]
             prompt = tokens_input(prompt_token_ids=prompt_ids)
             prompt["additional_information"] = additional_information
             return prompt
@@ -1826,23 +1821,25 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         normalized_text, normalized_ref_text = normalize_fish_voice_clone_texts(request.input, request.ref_text)
         ph_len = self._estimate_fish_prompt_len(normalized_text, normalized_ref_text, ref_audio_data)
 
-        # Structured clone: scalars (not list-wrapped) because model-side
-        # preprocess() consumes per-request fields directly.
-        additional_information: dict[str, Any] = {
-            "text": normalized_text,
-            "ref_text": normalized_ref_text,
-            "ref_audio_wav": torch.from_numpy(np.asarray(wav_samples, dtype=np.float32)),
-            "ref_audio_sr": int(sr),
-            "fish_structured_voice_clone": True,
-        }
+        # Structured clone branch: scalars (not list-wrapped) because the model-side
+        # preprocess() consumes per-request scalar fields directly.
+        additional_information = OmniInputStruct(
+            text=normalized_text,
+            ref_text=normalized_ref_text,
+            fish_speech=FishSpeechInputStruct(
+                ref_audio_wav=torch.from_numpy(np.asarray(wav_samples, dtype=np.float32)),
+                ref_audio_sr=int(sr),
+                fish_structured_voice_clone=True,
+            ),
+        )
         # Pass voice identity for model-side DAC code caching.
         if request.voice is not None:
             voice_lower = request.voice.lower()
             if voice_lower in self.uploaded_speakers:
-                additional_information["voice_name"] = voice_lower
-                additional_information["voice_created_at"] = self._voice_created_at(voice_lower)
+                additional_information.voice_name = voice_lower
+                additional_information.voice_created_at = self._voice_created_at(voice_lower)
         if request.max_new_tokens is not None:
-            additional_information["max_new_tokens"] = request.max_new_tokens
+            additional_information.max_new_tokens = request.max_new_tokens
         prompt = tokens_input(prompt_token_ids=[1] * ph_len)
         prompt["additional_information"] = additional_information
         return prompt

@@ -333,24 +333,25 @@ class MingFlashOmniTalkerForConditionalGeneration(nn.Module, CustomProcessMixin)
     def _resolve_generation_params(self, additional_info: dict[str, Any]) -> _GenerationParams:
         # "omni"    : thinker -> talker hand-off with hardcoded defaults
         # "instruct": standalone TTS with caller-supplied sampling knobs
-        ming_task = additional_info.get("ming_task", "instruct")
+        ming = additional_info.get("ming") or {}
+        ming_task = ming.get("ming_task", "instruct")
 
         if ming_task == "omni":
             prompt = MING_DEFAULT_PROMPT
             instruction = None
-            use_zero_spk_emb = additional_info.get("spk_emb") is None
+            use_zero_spk_emb = ming.get("spk_emb_tensor") is None and ming.get("spk_emb") is None
             cfg = 2.0
             sigma = 0.25
             temperature = 0.0
             max_steps = 200
         else:
-            prompt = additional_info.get("prompt", MING_DEFAULT_PROMPT)
+            prompt = ming.get("prompt", MING_DEFAULT_PROMPT)
             instruction = additional_info.get("instruction", None)
-            use_zero_spk_emb = additional_info.get("use_zero_spk_emb", False)
-            cfg = additional_info.get("cfg", self.cfg_strength)
-            sigma = additional_info.get("sigma", 0.25)
-            temperature = additional_info.get("temperature", 0.0)
-            max_steps = int(additional_info.get("max_steps", additional_info.get("max_decode_steps", 200)))
+            use_zero_spk_emb = ming.get("use_zero_spk_emb", False)
+            cfg = ming.get("cfg", self.cfg_strength)
+            sigma = ming.get("sigma", 0.25)
+            temperature = ming.get("temperature", 0.0)
+            max_steps = int(ming.get("max_steps") or ming.get("max_decode_steps") or 200)
 
         return _GenerationParams(
             prompt=prompt,
@@ -360,16 +361,18 @@ class MingFlashOmniTalkerForConditionalGeneration(nn.Module, CustomProcessMixin)
             temperature=temperature,
             max_steps=max_steps,
             use_zero_spk_emb=use_zero_spk_emb,
-            max_text_length=int(additional_info.get("max_text_length", 50)),
-            use_static_cache=bool(additional_info.get("use_static_cache", True)),
-            stream_decode=bool(additional_info.get("stream_decode", True)),
+            max_text_length=int(ming.get("max_text_length", 50)),
+            use_static_cache=bool(ming.get("use_static_cache", True)),
+            stream_decode=bool(ming.get("stream_decode", True)),
         )
 
     def _resolve_voice(self, additional_info: dict[str, Any]) -> _VoiceContext:
-        spk_emb = additional_info.get("spk_emb", None)
+        ming = additional_info.get("ming") or {}
+        # Stage-processed tensor wins; fall back to raw input list.
+        spk_emb = ming.get("spk_emb_tensor") if ming.get("spk_emb_tensor") is not None else ming.get("spk_emb")
         prompt_text = additional_info.get("prompt_text", None)
-        prompt_wav_lat = additional_info.get("prompt_wav_lat", None)
-        prompt_wav_emb = additional_info.get("prompt_wav_emb", None)
+        prompt_wav_lat = ming.get("prompt_wav_lat", None)
+        prompt_wav_emb = ming.get("prompt_wav_emb", None)
         already_projected = False
 
         voice_name = additional_info.get("voice_name", None)

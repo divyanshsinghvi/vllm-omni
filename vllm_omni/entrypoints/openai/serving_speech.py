@@ -31,7 +31,12 @@ from vllm.utils import random_uuid
 from vllm.utils.async_utils import make_async
 from vllm.v1.engine.exceptions import EngineDeadError, EngineGenerateError
 
-from vllm_omni.data_entry_keys import FishSpeechInputStruct, MossTTSInputStruct, OmniInputStruct
+from vllm_omni.data_entry_keys import (
+    FishSpeechInputStruct,
+    MingTTSInputStruct,
+    MossTTSInputStruct,
+    OmniInputStruct,
+)
 from vllm_omni.entrypoints.openai.audio_utils_mixin import AudioMixin
 from vllm_omni.entrypoints.openai.protocol.audio import (
     AudioResponse,
@@ -1979,21 +1984,23 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
 
         # TTS path applies ming task type `instruct`.
         # voice_name enables talker-side voice preset resolution (e.g. "DB30").
-        additional_information: dict[str, Any] = {
-            "ming_task": "instruct",
-            "prompt": MING_DEFAULT_PROMPT,
-            "text": request.input,
-            "instruction": ming_create_instruction(caption_fields),
-            "voice_name": request.voice or None,
-            "use_zero_spk_emb": not has_spk_emb,
-            "max_decode_steps": request.max_new_tokens or _TTS_MAX_NEW_TOKENS_MAX,
-            "cfg": 2.0,
-            "sigma": 0.25,
-            "temperature": 0.0,
-        }
+        ming = MingTTSInputStruct(
+            ming_task="instruct",
+            prompt=MING_DEFAULT_PROMPT,
+            use_zero_spk_emb=not has_spk_emb,
+            max_decode_steps=request.max_new_tokens or _TTS_MAX_NEW_TOKENS_MAX,
+            cfg=2.0,
+            sigma=0.25,
+            temperature=0.0,
+        )
         if has_spk_emb:
-            # Passed as plain float list
-            additional_information["spk_emb"] = list(request.speaker_embedding)
+            ming.spk_emb = list(request.speaker_embedding)
+        additional_information = OmniInputStruct(
+            text=request.input,
+            instruction=ming_create_instruction(caption_fields),
+            voice_name=request.voice or None,
+            ming=ming,
+        )
         prompt = tokens_input(prompt_token_ids=[0])
         prompt["additional_information"] = additional_information
         return prompt

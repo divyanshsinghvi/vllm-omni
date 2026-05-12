@@ -205,7 +205,8 @@ class MingTTSInputStruct(_StructBase):
     cfg: float | None = None
     sigma: float | None = None
     temperature: float | None = None
-    spk_emb: list[float] | None = None
+    spk_emb: list[float] | None = None  # user-input list shape (JSON)
+    spk_emb_tensor: torch.Tensor | None = None  # stage-processed tensor shape
     max_text_length: int | None = None
     max_steps: int | None = None
     max_decode_steps: int | None = None  # alias used by serving_speech

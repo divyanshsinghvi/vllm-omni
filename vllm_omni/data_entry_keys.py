@@ -166,6 +166,60 @@ class MetaStruct(_StructBase):
     omni_final_stage_id: int | None = None
 
 
+class RefAudioStruct(_StructBase):
+    samples: torch.Tensor | None = None
+    sample_rate: int | None = None
+    text: str | None = None
+
+
+class Qwen3TTSInputStruct(_StructBase):
+    task_type: str | list[str] | None = None
+    x_vector_only_mode: bool | list[bool] | None = None
+    voice_clone_prompt: list[dict[str, Any]] | None = None
+    non_streaming_mode: bool | list[bool] | None = None
+    cfg_value: float | list[float] | None = None
+    inference_timesteps: int | list[int] | None = None
+    min_len: int | list[int] | None = None
+    ref_ids: list[int] | None = None
+
+
+class MossTTSInputStruct(_StructBase):
+    mode: str | list[str] | None = None
+
+
+class MingTTSInputStruct(_StructBase):
+    ming_task: str | None = None
+    prompt: str | None = None
+    use_zero_spk_emb: bool | None = None
+    cfg: float | None = None
+    sigma: float | None = None
+    temperature: float | None = None
+    spk_emb: list[float] | None = None
+    max_text_length: int | None = None
+
+
+class FishSpeechInputStruct(_StructBase):
+    fish_structured_voice_clone: bool | None = None
+
+
+class OmniInputStruct(_StructBase):
+    text: str | list[str] | None = None
+    speaker: str | list[str] | None = None
+    language: str | list[str] | None = None
+    instruction: str | list[str] | None = None
+    max_new_tokens: int | list[int] | None = None
+    voice: str | None = None
+    voice_name: str | None = None
+    voice_created_at: int | None = None
+    ref_audio: list[RefAudioStruct] | None = None
+    ref_text: str | list[str] | None = None
+    initial_codec_chunk_frames: int | None = None
+    qwen3_tts: Qwen3TTSInputStruct | None = None
+    moss: MossTTSInputStruct | None = None
+    ming: MingTTSInputStruct | None = None
+    fish_speech: FishSpeechInputStruct | None = None
+
+
 class OmniPayloadStruct(_StructBase):
     hidden: torch.Tensor | None = None
     hidden_states: HiddenStatesStruct | None = None
@@ -173,10 +227,13 @@ class OmniPayloadStruct(_StructBase):
     ids: IdsStruct | None = None
     codes: CodesStruct | None = None
     meta: MetaStruct | None = None
+    input: OmniInputStruct | None = None
     latent: torch.Tensor | None = None
     generated_len: int | None = None
     model_outputs: list[torch.Tensor] | None = None
     mtp_inputs: tuple[torch.Tensor, torch.Tensor] | None = None
+    # Deprecated: moved to ``input.speaker`` / ``input.language``; kept until
+    # 3c.3 migrates the remaining stage producers/consumers.
     speaker: list[str] | str | None = None
     language: list[str] | str | None = None
     request_id: str | None = None
@@ -190,6 +247,7 @@ _NESTED_STRUCTS: dict[str, type[_StructBase]] = {
     "ids": IdsStruct,
     "codes": CodesStruct,
     "meta": MetaStruct,
+    "input": OmniInputStruct,
 }
 
 

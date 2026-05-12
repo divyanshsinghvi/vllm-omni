@@ -378,3 +378,16 @@ class TestSerializeDeserializePayload:
         original: OmniPayload = {"meta": {"finished": None}}
         wire = serialize_payload(original)
         assert wire is None
+
+
+class TestOmniInputStruct:
+    def test_forbid_unknown_input_fields(self):
+        with pytest.raises(msgspec.ValidationError):
+            msgspec.convert({"input": {"not_a_real_field": 1}}, OmniPayloadStruct)
+
+    def test_forbid_unknown_per_model_fields(self):
+        with pytest.raises(msgspec.ValidationError):
+            msgspec.convert(
+                {"input": {"qwen3_tts": {"not_a_real_field": 1}}},
+                OmniPayloadStruct,
+            )

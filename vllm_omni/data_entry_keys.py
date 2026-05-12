@@ -293,24 +293,33 @@ def validate_payload(payload: dict[str, Any] | None, *, context: str = "payload"
         raise msgspec.ValidationError(f"{context}: {exc}") from exc
 
 
+def _struct_to_dict_recursive(val: Any) -> Any:
+    """Recursively expand nested ``_StructBase`` values into plain dicts.
+
+    Tensors, primitives, and dicts pass through unchanged. Lists are walked
+    element-wise so ``list[StructBase]`` (e.g. ``ref_audio``) is also expanded.
+    """
+    if isinstance(val, _StructBase):
+        out: dict[str, Any] = {}
+        for sk in val.__struct_fields__:
+            sv = getattr(val, sk)
+            if sv is None:
+                continue
+            out[sk] = _struct_to_dict_recursive(sv)
+        return out
+    if isinstance(val, list):
+        return [_struct_to_dict_recursive(v) for v in val]
+    return val
+
+
 def to_dict(struct: OmniPayloadStruct) -> dict[str, Any]:
-    """Convert ``OmniPayloadStruct`` to a plain dict, dropping ``None`` fields."""
-    out: dict[str, Any] = {}
-    for field in OmniPayloadStruct.__struct_fields__:
-        value = getattr(struct, field)
-        if value is None:
-            continue
-        if isinstance(value, _StructBase):
-            sub: dict[str, Any] = {}
-            for sk in value.__struct_fields__:
-                sv = getattr(value, sk)
-                if sv is not None:
-                    sub[sk] = sv
-            if sub:
-                out[field] = sub
-        else:
-            out[field] = value
-    return out
+    """Convert ``OmniPayloadStruct`` to a plain dict, dropping ``None`` fields.
+
+    Nested sub-structs (e.g. ``OmniInputStruct``, ``Qwen3TTSInputStruct``,
+    ``RefAudioStruct``) are expanded recursively so the result is dict-of-dicts
+    all the way down.
+    """
+    return _struct_to_dict_recursive(struct) or {}
 
 
 _DTYPE_TO_NAME: dict[torch.dtype, str] = {
@@ -332,7 +341,7 @@ def _dtype_to_name(dtype: torch.dtype) -> str:
 
 
 # ── Keys whose values are nested dicts (TypedDict sub-categories) ──
-_NESTED_KEYS = frozenset({"hidden_states", "embed", "ids", "codes", "meta"})
+_NESTED_KEYS = frozenset({"hidden_states", "embed", "ids", "codes", "meta", "input"})
 
 
 def flatten_payload(payload: dict[str, Any] | OmniPayloadStruct) -> dict[str, Any]:

@@ -391,3 +391,24 @@ class TestOmniInputStruct:
                 {"input": {"qwen3_tts": {"not_a_real_field": 1}}},
                 OmniPayloadStruct,
             )
+
+    def test_input_top_level_round_trip(self):
+        """serving_chat-style input (speaker/language/instruction) survives the wire."""
+        from vllm_omni.data_entry_keys import OmniInputStruct, Qwen3TTSInputStruct
+
+        original = OmniPayloadStruct(
+            input=OmniInputStruct(
+                speaker=["alice"],
+                language=["en"],
+                instruction="be polite",
+                qwen3_tts=Qwen3TTSInputStruct(task_type=["VoiceClone"], min_len=[3]),
+            ),
+            meta=MetaStruct(left_context_size=4),
+        )
+        wire = serialize_payload(original)
+        restored = deserialize_payload(wire)
+        assert restored["input"]["speaker"] == ["alice"]
+        assert restored["input"]["language"] == ["en"]
+        assert restored["input"]["instruction"] == "be polite"
+        assert restored["input"]["qwen3_tts"] == {"task_type": ["VoiceClone"], "min_len": [3]}
+        assert restored["meta"]["left_context_size"] == 4

@@ -339,15 +339,13 @@ def thinker2talker_async_chunk(
         )
         if transfer_manager.request_payload.get(request_id) is None:
             if not is_finished:
-                transfer_manager.request_payload[request_id] = to_dict(payload)
+                transfer_manager.request_payload[request_id] = payload
                 return None
         else:
-            save_payload = transfer_manager.request_payload.pop(request_id)
-            payload.embed.prefill = torch.cat(
-                (save_payload.get("embed", {}).get("prefill"), payload.embed.prefill), dim=0
-            )
+            save_payload: OmniPayloadStruct = transfer_manager.request_payload.pop(request_id)
+            payload.embed.prefill = torch.cat((save_payload.embed.prefill, payload.embed.prefill), dim=0)
             payload.hidden_states.output = torch.cat(
-                (save_payload.get("hidden_states", {}).get("output"), payload.hidden_states.output), dim=0
+                (save_payload.hidden_states.output, payload.hidden_states.output), dim=0
             )
     else:
         output_token_ids = _ensure_list(request.output_token_ids)

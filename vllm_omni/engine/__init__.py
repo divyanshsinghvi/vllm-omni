@@ -12,6 +12,8 @@ from vllm.v1.engine import (
     EngineCoreRequest,
 )
 
+from vllm_omni.data_entry_keys import OmniInputStruct, OmniPayloadStruct
+
 
 class PromptEmbedsPayload(msgspec.Struct):
     """Serialized prompt embeddings payload for direct transfer.
@@ -48,13 +50,21 @@ class AdditionalInformationEntry(msgspec.Struct):
     scalar_data: Any | None = None
 
 
-class AdditionalInformationPayload(msgspec.Struct):
+class AdditionalInformationPayload(msgspec.Struct, tag=True):
     """Serialized dictionary payload for additional_information.
 
     Keys are strings; values are encoded as AdditionalInformationEntry.
+
+    Note: tagged to coexist with ``OmniInputStruct`` / ``OmniPayloadStruct``
+    in the union field type on ``OmniEngineCoreRequest`` during migration.
     """
 
     entries: dict[str, AdditionalInformationEntry]
+
+
+# Union envelope for OmniEngineCoreRequest.additional_information.
+# All three variants are tagged, so msgspec dispatches by class-name tag.
+AdditionalInformationField = OmniInputStruct | OmniPayloadStruct | AdditionalInformationPayload | None
 
 
 class OmniEngineCoreRequest(EngineCoreRequest):
@@ -73,8 +83,10 @@ class OmniEngineCoreRequest(EngineCoreRequest):
             dictionary containing tensors or lists to pass along with the request
     """
 
-    # Optional additional information dictionary (serialized)
-    additional_information: AdditionalInformationPayload | None = None
+    # Optional additional information payload. Accepts the legacy
+    # ``AdditionalInformationPayload`` envelope alongside the typed
+    # ``OmniInputStruct`` / ``OmniPayloadStruct`` structs during migration.
+    additional_information: AdditionalInformationField = None
 
     @classmethod
     def from_request(
@@ -82,7 +94,7 @@ class OmniEngineCoreRequest(EngineCoreRequest):
         request: EngineCoreRequest,
         *,
         prompt_embeds: torch.Tensor | None = None,
-        additional_information: AdditionalInformationPayload | None = None,
+        additional_information: AdditionalInformationField = None,
     ) -> "OmniEngineCoreRequest":
         """Clone an EngineCoreRequest into an OmniEngineCoreRequest with optional payload overrides."""
 

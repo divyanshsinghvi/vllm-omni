@@ -303,7 +303,6 @@ class MingFlashOmniTalkerForConditionalGeneration(nn.Module, CustomProcessMixin)
         positions: torch.Tensor,
         intermediate_tensors: IntermediateTensors | None = None,
         inputs_embeds: torch.Tensor | None = None,
-        runtime_additional_information: list[dict] | None = None,
         **kwargs,
     ) -> OmniOutput:
         """Run TTS generation and return audio output.

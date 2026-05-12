@@ -1118,28 +1118,20 @@ class VoxCPM2TalkerForConditionalGeneration(nn.Module):
     def preprocess(
         self, input_ids: torch.Tensor, input_embeds: torch.Tensor | None, **info_dict: Any
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
-        additional = info_dict.get("additional_information")
-        if isinstance(additional, dict):
-            merged = {k: v for k, v in info_dict.items() if k != "additional_information"}
-            for k, v in additional.items():
-                merged.setdefault(k, v)
-            info_dict = merged
-
         span_len = int(input_ids.shape[0])
         dev = input_ids.device
         req_id = info_dict.get("request_id", "default")
         is_prefill = span_len > 1
 
-        # VoxCPM2-specific params live under ``OmniInputStruct.voxcpm2`` after
-        # the input migration; ``info_dict`` is the deserialized dict view.
-        voxcpm2_info = info_dict.get("voxcpm2") or {}
+        input_struct: OmniInputStruct | None = info_dict.get("model_input_struct")
+        voxcpm2_struct: VoxCPM2InputStruct | None = input_struct.voxcpm2 if input_struct is not None else None
 
         if is_prefill:
             # Do not evict state here: _pending_requests is a per-step prefix,
             # not the full batch. Cleanup is driven by on_requests_finished ->
             # _flush_deferred_cleanup (fed by vLLM scheduler._free_request via
             # gpu_ar_model_runner.py).
-            real = voxcpm2_info.get("text_token_ids")
+            real = voxcpm2_struct.text_token_ids if voxcpm2_struct is not None else None
             token_ids = input_ids.tolist() if real is None else real[0]
             # Fail-fast: unsplit multichar Chinese IDs in input_ids means the
             # serving layer didn't pre-split.  Silent fixup here would cause
@@ -1167,9 +1159,9 @@ class VoxCPM2TalkerForConditionalGeneration(nn.Module):
             state.is_stopping = False
 
             # Voice clone / continuation
-            ref_audio = info_dict.get("ref_audio")
-            prompt_audio = voxcpm2_info.get("prompt_audio")
-            prompt_text = info_dict.get("prompt_text")
+            ref_audio = input_struct.ref_audio if input_struct is not None else None
+            prompt_audio = voxcpm2_struct.prompt_audio if voxcpm2_struct is not None else None
+            prompt_text = input_struct.prompt_text if input_struct is not None else None
             if isinstance(ref_audio, list):
                 ref_audio = ref_audio[0] if ref_audio else None
             if isinstance(prompt_audio, list):
@@ -1178,10 +1170,13 @@ class VoxCPM2TalkerForConditionalGeneration(nn.Module):
                 prompt_text = prompt_text[0] if prompt_text else None
 
             state.prompt_cache = None
-            voice_name = info_dict.get("voice_name")
+            voice_name = input_struct.voice_name if input_struct is not None else None
             if isinstance(voice_name, list):
                 voice_name = voice_name[0] if voice_name else None
-            _created_at = int(info_dict.get("voice_created_at") or 0)
+            voice_created_at = input_struct.voice_created_at if input_struct is not None else None
+            if isinstance(voice_created_at, list):
+                voice_created_at = voice_created_at[0] if voice_created_at else 0
+            _created_at = int(voice_created_at or 0)
 
             if ref_audio or (prompt_audio and prompt_text):
                 # Check speaker cache for reference-only mode

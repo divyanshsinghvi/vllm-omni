@@ -1353,8 +1353,14 @@ class OmniGPUModelRunner(GPUModelRunner):
                 # call the custom process function
                 req_infos["request_id"] = req_id
                 embed_slice = inputs_embeds[s:e] if inputs_embeds is not None else None
+                input_struct_fields = set(OmniInputStruct.__struct_fields__)
+                i_dict = {k: v for k, v in req_infos.items() if k in input_struct_fields}
+                req_input_struct = to_input_struct(i_dict) if i_dict else None
                 req_input_ids, req_embeds, update_dict = self.model.preprocess(
-                    input_ids=input_ids[s:e], input_embeds=embed_slice, **req_infos
+                    input_ids=input_ids[s:e],
+                    input_embeds=embed_slice,
+                    model_input_struct=req_input_struct,
+                    **req_infos,
                 )
                 if inputs_embeds is None:
                     inputs_embeds = torch.empty(

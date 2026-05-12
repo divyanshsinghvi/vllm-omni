@@ -423,7 +423,7 @@ class TestOmniInputStruct:
             speaker=["alice"],
             language=["en"],
             instruction="be polite",
-            qwen3_tts=Qwen3TTSInputStruct(task_type=["VoiceClone"], min_len=[3]),
+            qwen3_tts=Qwen3TTSInputStruct(task_type=["VoiceClone"], non_streaming_mode=[True]),
         )
         wire = serialize_payload(original)
         assert "speaker" in wire.entries

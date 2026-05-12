@@ -172,19 +172,37 @@ class RefAudioStruct(_StructBase):
     text: str | None = None
 
 
+class VoiceClonePromptStruct(_StructBase):
+    """Inline speaker embedding payload used by qwen3_tts x-vector clone."""
+
+    ref_spk_embedding: list[float] | None = None
+
+
 class Qwen3TTSInputStruct(_StructBase):
     task_type: str | list[str] | None = None
     x_vector_only_mode: bool | list[bool] | None = None
-    voice_clone_prompt: list[dict[str, Any]] | None = None
+    voice_clone_prompt: list[VoiceClonePromptStruct] | None = None
     non_streaming_mode: bool | list[bool] | None = None
-    cfg_value: float | list[float] | None = None
-    inference_timesteps: int | list[int] | None = None
-    min_len: int | list[int] | None = None
+    # ``instruct`` (qwen3_tts wire-name); the top-level ``OmniInputStruct.instruction``
+    # is the cross-model alias for the same intent.
+    instruct: str | list[str] | None = None
     ref_ids: list[int] | None = None
 
 
 class MossTTSInputStruct(_StructBase):
     mode: str | list[str] | None = None
+    prompt_audio_path: str | list[str] | None = None
+    prompt_audio_array: list[Any] | None = None  # [[wav_list, sr]] shape
+    prompt_text: str | list[str] | None = None
+    max_new_frames: int | list[int] | None = None
+    seed: int | list[int] | None = None
+    text_temperature: float | list[float] | None = None
+    text_top_p: float | list[float] | None = None
+    text_top_k: int | list[int] | None = None
+    audio_temperature: float | list[float] | None = None
+    audio_top_p: float | list[float] | None = None
+    audio_top_k: int | list[int] | None = None
+    audio_repetition_penalty: float | list[float] | None = None
 
 
 class MingTTSInputStruct(_StructBase):
@@ -196,10 +214,44 @@ class MingTTSInputStruct(_StructBase):
     temperature: float | None = None
     spk_emb: list[float] | None = None
     max_text_length: int | None = None
+    max_steps: int | None = None
+    max_decode_steps: int | None = None  # alias used by serving_speech
+    use_static_cache: bool | None = None
+    stream_decode: bool | None = None
+    prompt_text: str | None = None
+    prompt_wav_lat: torch.Tensor | None = None
+    prompt_wav_emb: torch.Tensor | None = None
 
 
 class FishSpeechInputStruct(_StructBase):
     fish_structured_voice_clone: bool | None = None
+    ref_audio_wav: torch.Tensor | None = None
+    ref_audio_sr: int | None = None
+
+
+class VoxCPMInputStruct(_StructBase):
+    cfg_value: float | list[float] | None = None
+    inference_timesteps: int | list[int] | None = None
+    min_len: int | list[int] | None = None
+    max_len: int | list[int] | None = None
+    retry_badcase: bool | list[bool] | None = None
+    retry_badcase_max_times: int | list[int] | None = None
+    retry_badcase_ratio_threshold: float | list[float] | None = None
+    streaming_prefix_len: int | list[int] | None = None
+    prompt_text: str | list[str] | None = None
+    prompt_wav_path: str | list[str] | None = None
+    latent_audio_feat: torch.Tensor | None = None  # stage-runtime carry-over
+
+
+class VoxCPM2InputStruct(_StructBase):
+    text_token_ids: list[list[int]] | None = None
+    prompt_audio: list[Any] | None = None  # [[ref_audio, ref_sr]]
+    reference_audio: list[Any] | None = None  # [[ref_audio, ref_sr]]
+
+
+class OmniVoiceInputStruct(_StructBase):
+    raw_text: str | None = None
+    ref_audio_tokens: torch.Tensor | None = None
 
 
 class OmniInputStruct(_StructBase):
@@ -218,6 +270,9 @@ class OmniInputStruct(_StructBase):
     moss: MossTTSInputStruct | None = None
     ming: MingTTSInputStruct | None = None
     fish_speech: FishSpeechInputStruct | None = None
+    voxcpm: VoxCPMInputStruct | None = None
+    voxcpm2: VoxCPM2InputStruct | None = None
+    omnivoice: OmniVoiceInputStruct | None = None
 
 
 class OmniPayloadStruct(_StructBase):
@@ -374,7 +429,7 @@ def _dtype_to_name(dtype: torch.dtype) -> str:
 
 # ── Keys whose values are nested dicts (TypedDict sub-categories) ──
 _NESTED_KEYS = frozenset({"hidden_states", "embed", "ids", "codes", "meta"})
-_INPUT_NESTED_KEYS = frozenset({"qwen3_tts", "moss", "ming", "fish_speech", "voxcpm"})
+_INPUT_NESTED_KEYS = frozenset({"qwen3_tts", "moss", "ming", "fish_speech", "voxcpm", "voxcpm2", "omnivoice"})
 
 
 def flatten_payload(

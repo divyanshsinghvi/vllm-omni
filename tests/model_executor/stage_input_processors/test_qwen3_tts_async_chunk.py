@@ -214,13 +214,13 @@ def test_connector_initial_chunk_config_overrides_dynamic_ic():
 
     p1 = _call(tm, "r", n_frames=4)
     assert p1 is not None
-    assert len(p1["codes"]["audio"]) == _Q * 4
+    assert len(p1.codes.audio) == _Q * 4
 
     # Only the first chunk uses the small size; the next emit is 4+25.
     assert _call(tm, "r", n_frames=25) is None
     p2 = _call(tm, "r", n_frames=29)
     assert p2 is not None
-    assert p2["meta"]["left_context_size"] == 4
+    assert p2.meta.left_context_size == 4
 
 
 @pytest.mark.parametrize(

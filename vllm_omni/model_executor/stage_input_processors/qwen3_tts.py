@@ -17,9 +17,9 @@ from vllm_omni.model_executor.stage_input_processors.chunk_size_utils import (
 )
 from vllm_omni.model_executor.stage_input_processors.tts_utils import (
     extract_language_from_prompt,
-    extract_language_from_request,
     extract_speaker_from_prompt,
-    extract_speaker_from_request,
+    input_language_from_request,
+    input_speaker_from_request,
 )
 
 logger = init_logger(__name__)
@@ -262,6 +262,6 @@ def talker2code2wav_async_chunk(
             left_context_size=left_context_size,
             finished=torch.tensor(finished, dtype=torch.bool),
         ),
-        speaker=extract_speaker_from_request(request),
-        language=extract_language_from_request(request),
+        speaker=input_speaker_from_request(request),
+        language=input_language_from_request(request),
     )

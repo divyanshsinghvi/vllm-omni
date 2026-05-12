@@ -86,35 +86,6 @@ def input_language_from_prompt(
 # =============================================================================
 
 
-def extract_speaker_from_request(request: Any) -> str | None:
-    """Extract speaker from a request's additional_information field.
-
-    Reads from the structured ``additional_information.entries["speaker"]``
-    field used by the engine serialization layer.
-
-    Args:
-        request: An OmniEngineCoreRequest (or compatible object) with an
-            ``additional_information`` attribute.
-
-    Returns:
-        The speaker string (lowercase, stripped), or None if not present.
-    """
-    additional_information = getattr(request, "additional_information", None)
-    if additional_information is None:
-        return None
-    entries = getattr(additional_information, "entries", None)
-    if not isinstance(entries, dict):
-        return None
-    entry = entries.get("speaker")
-    if entry is None:
-        return None
-    list_data = getattr(entry, "list_data", None)
-    if isinstance(list_data, list) and list_data:
-        val = list_data[0]
-        return val.lower().strip() if isinstance(val, str) else str(val).lower().strip()
-    return None
-
-
 def extract_speaker_from_prompt(
     prompt: Any,
     index: int = 0,
@@ -148,31 +119,6 @@ def extract_speaker_from_prompt(
 # =============================================================================
 # Language helpers
 # =============================================================================
-
-
-def extract_language_from_request(request: Any) -> str | None:
-    """Extract language from a request's additional_information field.
-
-    Args:
-        request: An OmniEngineCoreRequest (or compatible object) with an
-            ``additional_information`` attribute.
-
-    Returns:
-        The language string, or None if not present.
-    """
-    additional_information = getattr(request, "additional_information", None)
-    if additional_information is None:
-        return None
-    entries = getattr(additional_information, "entries", None)
-    if not isinstance(entries, dict):
-        return None
-    entry = entries.get("language")
-    if entry is None:
-        return None
-    list_data = getattr(entry, "list_data", None)
-    if isinstance(list_data, list) and list_data:
-        return list_data
-    return None
 
 
 def extract_language_from_prompt(

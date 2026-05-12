@@ -259,6 +259,7 @@ class OmniInputStruct(_StructBase):
     global_request_id: str | list[str] | None = None
     _is_dummy: bool | None = None
     _omni_req_id: str | None = None
+    _voxcpm_stream_key: str | None = None
     qwen3_tts: Qwen3TTSInputStruct | None = None
     moss: MossTTSInputStruct | None = None
     ming: MingTTSInputStruct | None = None

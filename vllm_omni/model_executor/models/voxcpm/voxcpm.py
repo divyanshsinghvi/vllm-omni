@@ -445,21 +445,21 @@ class VoxCPMForConditionalGeneration(nn.Module):
             return value[0] if value else default
         return value
 
-    def _resolve_stream_request_key(self, info: dict[str, Any]) -> str:
-        request_key = info.get("__voxcpm_stream_key")
-        if request_key is not None:
-            return str(request_key)
+    def _resolve_stream_request_key(self, info: dict[str, Any], input_struct: OmniInputStruct | None) -> str:
+        cached = input_struct._voxcpm_stream_key if input_struct is not None else None
+        if cached is not None:
+            return str(cached)
 
-        request_key = info.get("_omni_req_id")
-        if request_key is not None:
-            request_key = str(request_key)
-            info["__voxcpm_stream_key"] = request_key
-            return request_key
+        omni_req_id = input_struct._omni_req_id if input_struct is not None else None
+        if omni_req_id is not None:
+            key = str(omni_req_id)
+            info["_voxcpm_stream_key"] = key
+            return key
 
-        request_key = f"voxcpm-local-{self._next_local_stream_key}"
+        key = f"voxcpm-local-{self._next_local_stream_key}"
         self._next_local_stream_key += 1
-        info["__voxcpm_stream_key"] = request_key
-        return str(request_key)
+        info["_voxcpm_stream_key"] = key
+        return key
 
     def _recover_latent_from_input_ids(self, input_ids: torch.Tensor | None) -> torch.Tensor | None:
         if input_ids is None or input_ids.numel() == 0:
@@ -714,7 +714,7 @@ class VoxCPMForConditionalGeneration(nn.Module):
             retry_badcase_ratio_threshold = float(self._extract_val(voxcpm, "retry_badcase_ratio_threshold", 6.0))
             streaming_prefix_len = int(self._extract_val(voxcpm, "streaming_prefix_len", 3))
 
-            request_key = self._resolve_stream_request_key(info)
+            request_key = self._resolve_stream_request_key(info, input_struct)
             created_temp: str | None = None
 
             if async_chunk:

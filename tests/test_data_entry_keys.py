@@ -135,8 +135,12 @@ class TestWireEquivalenceStructVsDict:
     def _assert_decoded_equal(a, b):
         if isinstance(a, dict):
             assert isinstance(b, dict)
-            assert sorted(a.keys()) == sorted(b.keys())
-            for k in a:
+            # ``type`` is the msgspec tag emitted by tagged Structs; the dict
+            # round-trip never carries it. Compare on the data keys.
+            a_keys = sorted(k for k in a if k != "type")
+            b_keys = sorted(k for k in b if k != "type")
+            assert a_keys == b_keys
+            for k in a_keys:
                 TestWireEquivalenceStructVsDict._assert_decoded_equal(a[k], b[k])
         elif isinstance(a, torch.Tensor):
             assert isinstance(b, torch.Tensor)

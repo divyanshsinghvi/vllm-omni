@@ -243,7 +243,7 @@ class OmniVoiceInputStruct(_StructBase):
     ref_audio_tokens: torch.Tensor | None = None
 
 
-class OmniInputStruct(_StructBase):
+class OmniInputStruct(_StructBase, tag=True):
     text: str | list[str] | None = None
     speaker: str | list[str] | None = None
     language: str | list[str] | None = None
@@ -269,7 +269,7 @@ class OmniInputStruct(_StructBase):
     omnivoice: OmniVoiceInputStruct | None = None
 
 
-class OmniPayloadStruct(_StructBase):
+class OmniPayloadStruct(_StructBase, tag=True):
     """Stage-to-stage payload. Stage processors only forward stage *outputs*
     (codes/meta/embed/hidden_states/ids); user input controls live on
     ``OmniInputStruct`` and never round-trip through stage payloads."""

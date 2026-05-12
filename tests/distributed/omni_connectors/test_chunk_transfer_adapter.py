@@ -688,6 +688,8 @@ def test_wire_round_trip_struct_to_dict_contract():
     assert torch.equal(decoded["codes"]["audio"], torch.tensor([1, 2, 3], dtype=torch.int64))
 
     expected = to_dict(struct)
-    assert set(decoded.keys()) == set(expected.keys())
-    assert set(decoded["meta"].keys()) == set(expected["meta"].keys())
-    assert set(decoded["codes"].keys()) == set(expected["codes"].keys())
+    # ``type`` is the msgspec tag emitted by tagged Structs; ignore it for the
+    # dict-key contract check.
+    assert {k for k in decoded if k != "type"} == set(expected.keys())
+    assert {k for k in decoded["meta"] if k != "type"} == set(expected["meta"].keys())
+    assert {k for k in decoded["codes"] if k != "type"} == set(expected["codes"].keys())

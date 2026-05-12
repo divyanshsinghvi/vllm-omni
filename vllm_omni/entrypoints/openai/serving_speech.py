@@ -36,6 +36,9 @@ from vllm_omni.data_entry_keys import (
     MingTTSInputStruct,
     MossTTSInputStruct,
     OmniInputStruct,
+    Qwen3TTSInputStruct,
+    VoiceClonePromptStruct,
+    VoxCPMInputStruct,
 )
 from vllm_omni.entrypoints.openai.audio_utils_mixin import AudioMixin
 from vllm_omni.entrypoints.openai.protocol.audio import (
@@ -602,11 +605,12 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         except Exception:
             return None
 
-    def _estimate_prompt_len(self, tts_params: dict[str, Any]) -> int:
+    def _estimate_prompt_len(self, tts_params: OmniInputStruct) -> int:
         """Estimate prompt length so the placeholder matches model-side embeddings."""
         try:
             if self._tts_model_type == "voxcpm":
                 return 1
+            from vllm_omni.data_entry_keys import to_dict
             from vllm_omni.model_executor.models.qwen3_tts.qwen3_tts_talker import (
                 Qwen3TTSTalkerForConditionalGeneration,
             )
@@ -622,9 +626,12 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                 )
             hf_config = self.engine_client.model_config.hf_config
             talker_config = hf_config.talker_config
-            task_type = (tts_params.get("task_type") or ["CustomVoice"])[0]
+            # Convert to dict view; downstream reads nested ``qwen3_tts.*``.
+            tts_info_dict = to_dict(tts_params) if isinstance(tts_params, OmniInputStruct) else tts_params
+            qwen3_info = tts_info_dict.get("qwen3_tts") or {}
+            task_type = (qwen3_info.get("task_type") or ["CustomVoice"])[0]
             return Qwen3TTSTalkerForConditionalGeneration.estimate_prompt_len_from_additional_information(
-                additional_information=tts_params,
+                additional_information=tts_info_dict,
                 task_type=task_type,
                 tokenize_prompt=lambda t: self._tts_tokenizer(t, padding=False)["input_ids"],
                 codec_language_id=getattr(talker_config, "codec_language_id", None),
@@ -1642,45 +1649,40 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         key = "audio" if "audio" in mm else ("model_outputs" if "model_outputs" in mm else None)
         return mm, key
 
-    def _build_tts_params(self, request: OpenAICreateSpeechRequest) -> dict[str, Any]:
+    def _build_tts_params(self, request: OpenAICreateSpeechRequest) -> OmniInputStruct:
         """Build TTS parameters from request.
 
         Processes each parameter if present, skips if not.
         Values are wrapped in lists as required by the model.
         """
         if self._tts_model_type == "voxcpm":
-            params: dict[str, Any] = {
-                "text": [request.input],
-                "cfg_value": [2.0],
-                "inference_timesteps": [10],
-                "min_len": [2],
-                "max_new_tokens": [request.max_new_tokens or 4096],
-            }
+            inp = OmniInputStruct(
+                text=[request.input],
+                max_new_tokens=[request.max_new_tokens or 4096],
+                voxcpm=VoxCPMInputStruct(
+                    cfg_value=[2.0],
+                    inference_timesteps=[10],
+                    min_len=[2],
+                ),
+            )
             if request.ref_text is not None:
-                params["ref_text"] = [request.ref_text]
-            return params
+                inp.ref_text = [request.ref_text]
+            return inp
 
-        params: dict[str, Any] = {}
-
-        # Text content (always required)
-        params["text"] = [request.input]
-
-        # Task type
-        if request.task_type is not None:
-            params["task_type"] = [request.task_type]
-        else:
-            params["task_type"] = ["CustomVoice"]
-
-        # Language
-        if request.language is not None:
-            params["language"] = [request.language]
-        else:
-            params["language"] = ["Auto"]
+        # Qwen3-TTS branch.
+        qwen3 = Qwen3TTSInputStruct(
+            task_type=[request.task_type] if request.task_type is not None else ["CustomVoice"],
+        )
+        inp = OmniInputStruct(
+            text=[request.input],
+            language=[request.language] if request.language is not None else ["Auto"],
+            qwen3_tts=qwen3,
+        )
 
         # Speaker (voice)
         if request.voice is not None:
-            params["speaker"] = [request.voice]
-            params["voice_created_at"] = [self._voice_created_at(request.voice.lower())]
+            inp.speaker = [request.voice]
+            inp.voice_created_at = [self._voice_created_at(request.voice.lower())]
 
             # Uploaded voices use task_type="Base" (CustomVoice requires built-in spk_id).
             # If ref_text was provided at upload time, use in-context cloning; otherwise x_vector only.
@@ -1693,65 +1695,55 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                 embedding = self._get_uploaded_speaker_embedding(request.voice)
                 if embedding is not None:
                     request.speaker_embedding = embedding
-                    params["task_type"] = ["Base"]
+                    qwen3.task_type = ["Base"]
                     logger.info("Auto-set speaker_embedding for uploaded voice: %s", request.voice)
                 else:
                     audio_data = self._get_uploaded_audio_data(request.voice)
                     if not audio_data:
                         raise ValueError(f"Audio file for uploaded voice '{request.voice}' is missing or corrupted")
                     stored_ref_text = speaker_info.get("ref_text")
-                    params["ref_audio"] = [audio_data]
-                    params["task_type"] = ["Base"]
+                    inp.ref_audio = [audio_data]
+                    qwen3.task_type = ["Base"]
                     if stored_ref_text:
-                        params["ref_text"] = [stored_ref_text]
-                        params["x_vector_only_mode"] = [False]
+                        inp.ref_text = [stored_ref_text]
+                        qwen3.x_vector_only_mode = [False]
                     else:
-                        params["x_vector_only_mode"] = [True]
+                        qwen3.x_vector_only_mode = [True]
                     logger.info(
                         "Auto-set ref_audio for uploaded voice: %s (icl=%s)", request.voice, bool(stored_ref_text)
                     )
 
-        elif params["task_type"][0] == "CustomVoice":
-            params["speaker"] = ["Vivian"]  # Default for CustomVoice
+        elif qwen3.task_type[0] == "CustomVoice":
+            inp.speaker = ["Vivian"]  # Default for CustomVoice
 
         # Instructions for style/emotion control
-        if request.instructions is not None:
-            params["instruct"] = [request.instructions]
-        else:
-            params["instruct"] = [""]
+        qwen3.instruct = [request.instructions] if request.instructions is not None else [""]
 
         # Voice clone: ref_audio resolved in create_speech(), not here.
         if request.ref_text is not None:
-            params["ref_text"] = [request.ref_text]
+            inp.ref_text = [request.ref_text]
         if request.speaker_embedding is not None:
             # Store as plain float list (not tensor) so it survives msgspec
             # serialization through the EngineCore IPC boundary.  The talker's
             # _build_prompt_embeds converts it back to a tensor on the GPU.
-            params["voice_clone_prompt"] = [
-                {
-                    "ref_spk_embedding": list(request.speaker_embedding),
-                }
-            ]
+            qwen3.voice_clone_prompt = [VoiceClonePromptStruct(ref_spk_embedding=list(request.speaker_embedding))]
             # speaker_embedding implies x_vector_only_mode
-            params["x_vector_only_mode"] = [True]
+            qwen3.x_vector_only_mode = [True]
         elif request.x_vector_only_mode is not None:
-            params["x_vector_only_mode"] = [request.x_vector_only_mode]
+            qwen3.x_vector_only_mode = [request.x_vector_only_mode]
 
         # Generation parameters
-        if request.max_new_tokens is not None:
-            params["max_new_tokens"] = [request.max_new_tokens]
-        else:
-            params["max_new_tokens"] = [2048]
+        inp.max_new_tokens = [request.max_new_tokens] if request.max_new_tokens is not None else [2048]
 
         if request.initial_codec_chunk_frames is not None:
-            params["initial_codec_chunk_frames"] = [request.initial_codec_chunk_frames]
+            inp.initial_codec_chunk_frames = request.initial_codec_chunk_frames
 
         # VoiceDesign requires non_streaming_mode (match offline script behaviour).
         # CustomVoice and Base rely on the model default (True and False respectively).
-        if params["task_type"][0] == "VoiceDesign":
-            params["non_streaming_mode"] = [True]
+        if qwen3.task_type[0] == "VoiceDesign":
+            qwen3.non_streaming_mode = [True]
 
-        return params
+        return inp
 
     # ---- Voxtral TTS helpers ----
 
@@ -2114,12 +2106,12 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                 # Resolve ref_audio (explicit or auto-set for uploaded voices)
                 # to [[wav_list, sr]] so the model doesn't re-decode base64.
                 ref_audio_source = request.ref_audio
-                if ref_audio_source is None and isinstance(tts_params.get("ref_audio"), list):
+                if ref_audio_source is None and isinstance(tts_params.ref_audio, list):
                     # Uploaded voice: ref_audio was auto-set as [base64_data_url]
-                    ref_audio_source = tts_params["ref_audio"][0]
+                    ref_audio_source = tts_params.ref_audio[0]
                 if ref_audio_source is not None and isinstance(ref_audio_source, str):
                     wav_list, sr = await self._resolve_ref_audio(ref_audio_source)
-                    tts_params["ref_audio"] = [[wav_list, sr]]
+                    tts_params.ref_audio = [[wav_list, sr]]
 
                 ph_len = await self._estimate_prompt_len_async(tts_params)
                 prompt = tokens_input(prompt_token_ids=[1] * ph_len)

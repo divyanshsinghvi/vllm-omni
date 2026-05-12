@@ -539,8 +539,11 @@ class VoxCPMForConditionalGeneration(nn.Module):
 
     @classmethod
     def _resolve_prompt_inputs(cls, info: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+        # ``prompt_text``/``ref_text``/``ref_audio`` are cross-model top-level
+        # fields; ``prompt_wav_path`` lives on the voxcpm substruct.
+        voxcpm = info.get("voxcpm") or {}
         prompt_text = cls._extract_val(info, "prompt_text", None)
-        prompt_wav_path = cls._extract_val(info, "prompt_wav_path", None)
+        prompt_wav_path = cls._extract_val(voxcpm, "prompt_wav_path", None)
         if prompt_wav_path:
             if prompt_text is None:
                 prompt_text = cls._extract_val(info, "ref_text", None)
@@ -690,15 +693,16 @@ class VoxCPMForConditionalGeneration(nn.Module):
         last_chunk_flags: list[bool] | None = [] if async_chunk else None
         payload_finished_flags: list[bool] | None = [] if async_chunk else None
         for info in infos:
+            voxcpm = info.get("voxcpm") or {}
             text = self._extract_val(info, "text", "")
-            cfg_value = float(self._extract_val(info, "cfg_value", 2.0))
-            inference_timesteps = int(self._extract_val(info, "inference_timesteps", 10))
-            min_len = int(self._extract_val(info, "min_len", 2))
-            max_len = int(self._extract_val(info, "max_len", self._extract_val(info, "max_new_tokens", 4096)))
-            retry_badcase = bool(self._extract_val(info, "retry_badcase", True))
-            retry_badcase_max_times = int(self._extract_val(info, "retry_badcase_max_times", 3))
-            retry_badcase_ratio_threshold = float(self._extract_val(info, "retry_badcase_ratio_threshold", 6.0))
-            streaming_prefix_len = int(self._extract_val(info, "streaming_prefix_len", 3))
+            cfg_value = float(self._extract_val(voxcpm, "cfg_value", 2.0))
+            inference_timesteps = int(self._extract_val(voxcpm, "inference_timesteps", 10))
+            min_len = int(self._extract_val(voxcpm, "min_len", 2))
+            max_len = int(self._extract_val(voxcpm, "max_len", self._extract_val(info, "max_new_tokens", 4096)))
+            retry_badcase = bool(self._extract_val(voxcpm, "retry_badcase", True))
+            retry_badcase_max_times = int(self._extract_val(voxcpm, "retry_badcase_max_times", 3))
+            retry_badcase_ratio_threshold = float(self._extract_val(voxcpm, "retry_badcase_ratio_threshold", 6.0))
+            streaming_prefix_len = int(self._extract_val(voxcpm, "streaming_prefix_len", 3))
 
             request_key = self._resolve_stream_request_key(info)
             created_temp: str | None = None

@@ -561,11 +561,15 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
         if span_len <= 0:
             return input_ids, input_embeds if input_embeds is not None else self.embed_input_ids(input_ids), {}
 
+        # qwen3_tts-specific fields live under ``OmniInputStruct.qwen3_tts``
+        # after the input migration; ``info_dict`` is the dict view.
+        qwen3_info = info_dict.get("qwen3_tts") or {}
+
         text_list = info_dict.get("text")
         if not isinstance(text_list, list) or not text_list or not text_list[0]:
             raise ValueError("Missing additional_information.text for Qwen3-TTS AR talker.")
 
-        task_type = (info_dict.get("task_type") or ["CustomVoice"])[0]
+        task_type = (qwen3_info.get("task_type") or ["CustomVoice"])[0]
         codec_streaming_val = meta.get("codec_streaming")
         if isinstance(codec_streaming_val, list):
             codec_streaming_raw = codec_streaming_val[0] if codec_streaming_val else None
@@ -735,11 +739,12 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
             return x if x is not None else default
 
         info: dict[str, Any] = additional_information or {}
+        qwen3 = info.get("qwen3_tts") or {}
         text = _first(info.get("text"), "")
         language = _first(info.get("language"), "Auto")
         speaker = _first(info.get("speaker"), "").lower().strip()
-        instruct = _first(info.get("instruct"), "")
-        non_streaming_mode_raw = _first(info.get("non_streaming_mode"), None)
+        instruct = _first(qwen3.get("instruct"), "")
+        non_streaming_mode_raw = _first(qwen3.get("non_streaming_mode"), None)
 
         if isinstance(non_streaming_mode_raw, bool):
             non_streaming_mode = non_streaming_mode_raw
@@ -800,10 +805,10 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
                 prompt_len += 1
 
         if task_type == "Base":
-            xvec_only = bool(_first(info.get("x_vector_only_mode"), False))
+            xvec_only = bool(_first(qwen3.get("x_vector_only_mode"), False))
             in_context_mode = not xvec_only
 
-            voice_clone_prompt = _first(info.get("voice_clone_prompt"), None)
+            voice_clone_prompt = _first(qwen3.get("voice_clone_prompt"), None)
             if isinstance(voice_clone_prompt, dict):
                 icl_flag = _first(voice_clone_prompt.get("icl_mode"), None)
                 if isinstance(icl_flag, bool):
@@ -840,7 +845,7 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
                 if non_streaming_mode:
                     # _generate_icl_prompt(non_streaming_mode=True):
                     # text_embed = ref_ids + text_ids + eos.
-                    ref_ids = _first(info.get("ref_ids"), None)
+                    ref_ids = _first(qwen3.get("ref_ids"), None)
                     if isinstance(voice_clone_prompt, dict) and ref_ids is None:
                         ref_ids = _first(voice_clone_prompt.get("ref_ids") or voice_clone_prompt.get("ref_id"), None)
 
@@ -1239,9 +1244,10 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
         task_type: str,
         info_dict: dict[str, Any],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int | None, torch.Tensor | None]:
+        qwen3 = info_dict.get("qwen3_tts") or {}
         text = (info_dict.get("text") or [""])[0]
         language = (info_dict.get("language") or ["Auto"])[0]
-        non_streaming_mode_val = info_dict.get("non_streaming_mode")
+        non_streaming_mode_val = qwen3.get("non_streaming_mode")
         if isinstance(non_streaming_mode_val, list):
             non_streaming_mode_raw = non_streaming_mode_val[0] if non_streaming_mode_val else None
         else:
@@ -1261,7 +1267,7 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
         )
 
         # Optional instruct prefix.
-        instruct = (info_dict.get("instruct") or [""])[0]
+        instruct = (qwen3.get("instruct") or [""])[0]
         instruct_embed = None
         if isinstance(instruct, str) and instruct.strip():
             instruct_ids = tok(self._build_instruct_text(instruct), return_tensors="pt", padding=False)["input_ids"].to(
@@ -1359,9 +1365,9 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
 
         if task_type == "Base":
             # Base supports voice clone prompt with in-context mode.
-            xvec_only = bool((info_dict.get("x_vector_only_mode") or [False])[0])
+            xvec_only = bool((qwen3.get("x_vector_only_mode") or [False])[0])
             in_context_mode = not xvec_only
-            voice_clone_prompt = _normalize_voice_clone_prompt(info_dict.get("voice_clone_prompt"))
+            voice_clone_prompt = _normalize_voice_clone_prompt(qwen3.get("voice_clone_prompt"))
 
             # Speaker cache: only for uploaded (named) speakers
             _speaker_cache_key = None
@@ -1467,7 +1473,7 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
 
             if in_context_mode:
                 # Prefer explicit tokenized `ref_ids` if provided (matches official signature).
-                ref_ids = _to_long_tensor(info_dict.get("ref_ids"), device=input_ids.device)
+                ref_ids = _to_long_tensor(qwen3.get("ref_ids"), device=input_ids.device)
                 if ref_ids is None and voice_clone_prompt is not None:
                     ref_ids = _to_long_tensor(
                         voice_clone_prompt.get("ref_ids") or voice_clone_prompt.get("ref_id"), device=input_ids.device

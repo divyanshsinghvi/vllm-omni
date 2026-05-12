@@ -16,9 +16,9 @@ from vllm_omni.model_executor.stage_input_processors.chunk_size_utils import (
     max_ic_for_chunk_size,
 )
 from vllm_omni.model_executor.stage_input_processors.tts_utils import (
-    extract_language_from_prompt,
-    extract_speaker_from_prompt,
+    input_language_from_prompt,
     input_language_from_request,
+    input_speaker_from_prompt,
     input_speaker_from_request,
 )
 
@@ -101,8 +101,8 @@ def talker2code2wav(
             ref_code_len = 0
         # Code2Wav expects codebook-major flat: [Q*num_frames]
         codec_codes = audio_codes.transpose(0, 1).cpu().reshape(-1).tolist()
-        speaker = extract_speaker_from_prompt(prompt, index=i)
-        language = extract_language_from_prompt(prompt, index=i)
+        speaker = input_speaker_from_prompt(prompt, index=i)
+        language = input_language_from_prompt(prompt, index=i)
         meta = MetaStruct(left_context_size=ref_code_len) if ref_code_len > 0 else None
         additional_information = (
             OmniPayloadStruct(meta=meta, speaker=speaker, language=language)

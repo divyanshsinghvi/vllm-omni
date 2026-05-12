@@ -85,7 +85,7 @@ from vllm.tool_parsers.mistral_tool_parser import MistralToolCall
 from vllm.utils.collection_utils import as_list
 from vllm.v1.engine.exceptions import EngineDeadError
 
-from vllm_omni.data_entry_keys import OmniInputStruct, OmniPayloadStruct
+from vllm_omni.data_entry_keys import OmniInputStruct
 from vllm_omni.entrypoints.openai.audio_utils_mixin import AudioMixin
 from vllm_omni.entrypoints.openai.image_api_utils import validate_layered_layers
 from vllm_omni.entrypoints.openai.protocol import OmniChatCompletionStreamResponse
@@ -657,7 +657,7 @@ class OmniOpenAIServingChat(OpenAIServingChat, AudioMixin):
             input_struct = input_struct or OmniInputStruct()
             input_struct.instruction = instructions.strip()
         if input_struct is not None:
-            engine_prompt["additional_information"] = OmniPayloadStruct(input=input_struct)
+            engine_prompt["additional_information"] = input_struct
 
         return conversation, [engine_prompt]
 

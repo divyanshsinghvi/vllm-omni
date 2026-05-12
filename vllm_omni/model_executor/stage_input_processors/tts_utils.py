@@ -9,24 +9,23 @@ processor (qwen3_omni, qwen2_5_omni, qwen3_tts, etc.).
 
 from typing import Any
 
-from vllm_omni.data_entry_keys import OmniInputStruct, OmniPayloadStruct
+from vllm_omni.data_entry_keys import OmniInputStruct
 from vllm_omni.engine import AdditionalInformationEntry, AdditionalInformationPayload
 
 # =============================================================================
-# Read from ``OmniPayloadStruct.input`` — used by producers migrated to emit
-# ``OmniPayloadStruct(input=OmniInputStruct(...))``. The legacy extractors
-# below still read top-level keys for unmigrated producers.
+# Read from ``OmniInputStruct`` — used by producers migrated to emit
+# ``OmniInputStruct(...)`` directly on ``additional_information``. The wire
+# flattens its scalar fields at top level (no ``input.`` prefix) and its
+# per-model substructs under their model name (e.g. ``qwen3_tts.task_type``).
+# Legacy extractors below still read top-level keys for unmigrated producers
+# that emit a free dict.
 # =============================================================================
 
 
-def _input_value(entries: dict[str, AdditionalInformationEntry] | None, field: str) -> Any:
-    """Read ``input.<field>`` from a wire ``entries`` dict.
-
-    The wire flattens ``OmniInputStruct`` one level under ``input.*`` keys.
-    """
+def _entry_value(entries: dict[str, AdditionalInformationEntry] | None, field: str) -> Any:
     if not entries:
         return None
-    entry = entries.get(f"input.{field}")
+    entry = entries.get(field)
     if entry is None:
         return None
     return entry.list_data if entry.list_data is not None else entry.scalar_data
@@ -39,16 +38,14 @@ def _input_struct(prompt: dict[str, Any] | list[dict[str, Any]] | None, index: i
     if not isinstance(p, dict):
         return None
     add_info = p.get("additional_information")
-    if isinstance(add_info, OmniPayloadStruct):
-        return add_info.input
-    return None
+    return add_info if isinstance(add_info, OmniInputStruct) else None
 
 
 def input_speaker_from_request(request: Any) -> str | None:
     add_info: AdditionalInformationPayload | None = getattr(request, "additional_information", None)
     if add_info is None:
         return None
-    val = _input_value(add_info.entries, "speaker")
+    val = _entry_value(add_info.entries, "speaker")
     if isinstance(val, list) and val:
         val = val[0]
     if isinstance(val, str) and val.strip():
@@ -60,7 +57,7 @@ def input_language_from_request(request: Any) -> list[str] | None:
     add_info: AdditionalInformationPayload | None = getattr(request, "additional_information", None)
     if add_info is None:
         return None
-    val = _input_value(add_info.entries, "language")
+    val = _entry_value(add_info.entries, "language")
     if isinstance(val, list) and val:
         return val
     if isinstance(val, str) and val.strip():

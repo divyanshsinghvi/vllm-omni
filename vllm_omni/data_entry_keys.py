@@ -221,19 +221,23 @@ class OmniInputStruct(_StructBase):
 
 
 class OmniPayloadStruct(_StructBase):
+    """Stage-to-stage payload. Stage processors only forward stage *outputs*
+    (codes/meta/embed/hidden_states/ids); user input controls live on
+    ``OmniInputStruct`` and never round-trip through stage payloads."""
+
     hidden: torch.Tensor | None = None
     hidden_states: HiddenStatesStruct | None = None
     embed: EmbeddingsStruct | None = None
     ids: IdsStruct | None = None
     codes: CodesStruct | None = None
     meta: MetaStruct | None = None
-    input: OmniInputStruct | None = None
     latent: torch.Tensor | None = None
     generated_len: int | None = None
     model_outputs: list[torch.Tensor] | None = None
     mtp_inputs: tuple[torch.Tensor, torch.Tensor] | None = None
-    # Deprecated: moved to ``input.speaker`` / ``input.language``; kept until
-    # 3c.3 migrates the remaining stage producers/consumers.
+    # Forwarded input context: stage processors that need user-supplied
+    # speaker/language for downstream stages set these. Other input controls
+    # (text, ref_audio, per-model params) are *not* forwarded.
     speaker: list[str] | str | None = None
     language: list[str] | str | None = None
     request_id: str | None = None
@@ -247,7 +251,6 @@ _NESTED_STRUCTS: dict[str, type[_StructBase]] = {
     "ids": IdsStruct,
     "codes": CodesStruct,
     "meta": MetaStruct,
-    "input": OmniInputStruct,
 }
 
 
@@ -312,11 +315,10 @@ def _struct_to_dict_recursive(val: Any) -> Any:
     return val
 
 
-def to_dict(struct: OmniPayloadStruct) -> dict[str, Any]:
-    """Convert ``OmniPayloadStruct`` to a plain dict, dropping ``None`` fields.
+def to_dict(struct: OmniPayloadStruct | OmniInputStruct | _StructBase) -> dict[str, Any]:
+    """Convert any ``_StructBase`` to a plain dict, dropping ``None`` fields.
 
-    Nested sub-structs (e.g. ``OmniInputStruct``, ``Qwen3TTSInputStruct``,
-    ``RefAudioStruct``) are expanded recursively so the result is dict-of-dicts
+    Nested sub-structs are expanded recursively so the result is dict-of-dicts
     all the way down.
     """
     return _struct_to_dict_recursive(struct) or {}
@@ -341,24 +343,33 @@ def _dtype_to_name(dtype: torch.dtype) -> str:
 
 
 # ── Keys whose values are nested dicts (TypedDict sub-categories) ──
-_NESTED_KEYS = frozenset({"hidden_states", "embed", "ids", "codes", "meta", "input"})
+_NESTED_KEYS = frozenset({"hidden_states", "embed", "ids", "codes", "meta"})
+_INPUT_NESTED_KEYS = frozenset({"qwen3_tts", "moss", "ming", "fish_speech", "voxcpm"})
 
 
-def flatten_payload(payload: dict[str, Any] | OmniPayloadStruct) -> dict[str, Any]:
-    """Flatten a nested ``OmniPayload`` (dict or struct) to dotted keys.
+def flatten_payload(
+    payload: dict[str, Any] | OmniPayloadStruct | OmniInputStruct,
+    nested_keys: frozenset[str] | None = None,
+) -> dict[str, Any]:
+    """Flatten a nested payload (dict or struct) to dotted keys.
 
-    Nested sub-dicts/sub-structs under ``_NESTED_KEYS`` are expanded:
-    ``{"codes": {"audio": tensor}}`` → ``{"codes.audio": tensor}``.
-    ``hidden_states["layers"]`` is expanded to ``hidden_states.layer_N``.
-    Top-level values are kept as-is.
+    Sub-fields under ``nested_keys`` (default: stage-payload keys
+    ``_NESTED_KEYS``; pass ``_INPUT_NESTED_KEYS`` for ``OmniInputStruct``)
+    are expanded one level: ``{"codes": {"audio": tensor}}`` →
+    ``{"codes.audio": tensor}``. ``hidden_states["layers"]`` is expanded to
+    ``hidden_states.layer_N``. Other top-level values are kept as-is.
     """
+    if isinstance(payload, OmniInputStruct) and nested_keys is None:
+        nested_keys = _INPUT_NESTED_KEYS
+    if nested_keys is None:
+        nested_keys = _NESTED_KEYS
     if isinstance(payload, _StructBase):
         payload = to_dict(payload)
     if not payload:
         return {}
     flat: dict[str, Any] = {}
     for key, value in payload.items():
-        if key in _NESTED_KEYS and isinstance(value, dict):
+        if key in nested_keys and isinstance(value, dict):
             for qual, val in value.items():
                 if qual == "layers" and key == "hidden_states" and isinstance(val, dict):
                     for layer_idx, tensor in val.items():
@@ -411,7 +422,7 @@ def _deserialize_tensor(entry: AdditionalInformationEntry) -> torch.Tensor:
 
 
 def serialize_payload(
-    payload: OmniPayload | OmniPayloadStruct,
+    payload: OmniPayload | OmniPayloadStruct | OmniInputStruct,
 ) -> AdditionalInformationPayload | None:
     """Serialize an ``OmniPayload`` for EngineCore transport.
 

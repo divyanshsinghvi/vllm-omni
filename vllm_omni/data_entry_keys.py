@@ -257,6 +257,9 @@ class OmniInputStruct(_StructBase):
     ref_text: str | list[str] | None = None
     prompt_text: str | list[str] | None = None
     initial_codec_chunk_frames: int | None = None
+    global_request_id: str | list[str] | None = None
+    _is_dummy: bool | None = None
+    _omni_req_id: str | None = None
     qwen3_tts: Qwen3TTSInputStruct | None = None
     moss: MossTTSInputStruct | None = None
     ming: MingTTSInputStruct | None = None

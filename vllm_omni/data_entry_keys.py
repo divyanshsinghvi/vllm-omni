@@ -260,9 +260,9 @@ class OmniInputStruct(_StructBase):
     language: str | list[str] | None = None
     instruction: str | list[str] | None = None
     max_new_tokens: int | list[int] | None = None
-    voice: str | None = None
-    voice_name: str | None = None
-    voice_created_at: int | None = None
+    voice: str | list[str] | None = None
+    voice_name: str | list[str] | None = None
+    voice_created_at: int | list[int] | None = None
     ref_audio: list[RefAudioStruct] | None = None
     ref_text: str | list[str] | None = None
     initial_codec_chunk_frames: int | None = None

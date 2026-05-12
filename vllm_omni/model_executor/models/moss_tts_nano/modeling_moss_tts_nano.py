@@ -258,19 +258,22 @@ class MossTTSNanoForGeneration(nn.Module):
             yield torch.zeros((sr,), dtype=torch.float32), True
             return
 
-        mode: str = str(_pick(info, "mode", _DEFAULT_MODE))
-        prompt_audio_path: str | None = _pick(info, "prompt_audio_path", None)
+        # Moss-specific params live under ``OmniInputStruct.moss`` after the
+        # input migration; ``info`` is the deserialized dict view of the struct.
+        moss = info.get("moss") or {}
+        mode: str = str(_pick(moss, "mode", _DEFAULT_MODE))
+        prompt_audio_path: str | None = _pick(moss, "prompt_audio_path", None)
         if prompt_audio_path is not None:
             prompt_audio_path = str(prompt_audio_path)
         # Voice-cloning path: serving layer passes the resolved waveform as
         # (wav_list, sample_rate) so we can avoid re-decoding base64 and the
         # model owns temp-file lifecycle.
-        prompt_audio_array = _pick(info, "prompt_audio_array", None)
-        prompt_text: str | None = _pick(info, "prompt_text", None)
+        prompt_audio_array = _pick(moss, "prompt_audio_array", None)
+        prompt_text: str | None = _pick(moss, "prompt_text", None)
         if prompt_text is not None:
             prompt_text = str(prompt_text)
-        max_new_frames: int = int(_pick(info, "max_new_frames", _DEFAULT_MAX_NEW_FRAMES))
-        seed: int | None = _pick(info, "seed", None)
+        max_new_frames: int = int(_pick(moss, "max_new_frames", _DEFAULT_MAX_NEW_FRAMES))
+        seed: int | None = _pick(moss, "seed", None)
         if seed is not None:
             # Upstream inference_stream relies on global RNG state. With
             # max_num_seqs > 1, concurrent seeded requests will race to set
@@ -287,14 +290,14 @@ class MossTTSNanoForGeneration(nn.Module):
             _cuda_rng_state = None
 
         sampling = {
-            "text_temperature": float(_pick(info, "text_temperature", _DEFAULT_TEXT_TEMPERATURE)),
-            "text_top_p": float(_pick(info, "text_top_p", _DEFAULT_TEXT_TOP_P)),
-            "text_top_k": int(_pick(info, "text_top_k", _DEFAULT_TEXT_TOP_K)),
-            "audio_temperature": float(_pick(info, "audio_temperature", _DEFAULT_AUDIO_TEMPERATURE)),
-            "audio_top_p": float(_pick(info, "audio_top_p", _DEFAULT_AUDIO_TOP_P)),
-            "audio_top_k": int(_pick(info, "audio_top_k", _DEFAULT_AUDIO_TOP_K)),
+            "text_temperature": float(_pick(moss, "text_temperature", _DEFAULT_TEXT_TEMPERATURE)),
+            "text_top_p": float(_pick(moss, "text_top_p", _DEFAULT_TEXT_TOP_P)),
+            "text_top_k": int(_pick(moss, "text_top_k", _DEFAULT_TEXT_TOP_K)),
+            "audio_temperature": float(_pick(moss, "audio_temperature", _DEFAULT_AUDIO_TEMPERATURE)),
+            "audio_top_p": float(_pick(moss, "audio_top_p", _DEFAULT_AUDIO_TOP_P)),
+            "audio_top_k": int(_pick(moss, "audio_top_k", _DEFAULT_AUDIO_TOP_K)),
             "audio_repetition_penalty": float(
-                _pick(info, "audio_repetition_penalty", _DEFAULT_AUDIO_REPETITION_PENALTY)
+                _pick(moss, "audio_repetition_penalty", _DEFAULT_AUDIO_REPETITION_PENALTY)
             ),
         }
 

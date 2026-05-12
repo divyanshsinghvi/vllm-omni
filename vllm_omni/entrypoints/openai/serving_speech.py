@@ -31,6 +31,7 @@ from vllm.utils import random_uuid
 from vllm.utils.async_utils import make_async
 from vllm.v1.engine.exceptions import EngineDeadError, EngineGenerateError
 
+from vllm_omni.data_entry_keys import MossTTSInputStruct, OmniInputStruct
 from vllm_omni.entrypoints.openai.audio_utils_mixin import AudioMixin
 from vllm_omni.entrypoints.openai.protocol.audio import (
     AudioResponse,
@@ -1412,7 +1413,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             return fmt_err
         return None
 
-    async def _build_moss_tts_params(self, request: OpenAICreateSpeechRequest) -> dict[str, Any]:
+    async def _build_moss_tts_params(self, request: OpenAICreateSpeechRequest) -> OmniInputStruct:
         """Build additional_information for MOSS-TTS-Nano.
 
         Always uses upstream's ``voice_clone`` mode (the recommended workflow
@@ -1424,15 +1425,14 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         lifecycle. ``request.voice`` and ``request.ref_text`` are
         intentionally ignored — see ``_validate_moss_tts_request``.
         """
-        params: dict[str, Any] = {
-            "text": [request.input],
-            "mode": ["voice_clone"],
-        }
-        if request.max_new_tokens is not None:
-            params["max_new_frames"] = [request.max_new_tokens]
         wav_list, sr = await self._resolve_ref_audio(request.ref_audio)
-        params["prompt_audio_array"] = [[wav_list, sr]]
-        return params
+        moss = MossTTSInputStruct(
+            mode=["voice_clone"],
+            prompt_audio_array=[[wav_list, sr]],
+        )
+        if request.max_new_tokens is not None:
+            moss.max_new_frames = [request.max_new_tokens]
+        return OmniInputStruct(text=[request.input], moss=moss)
 
     def _validate_fish_tts_request(self, request: OpenAICreateSpeechRequest) -> str | None:
         """Validate Fish Speech request parameters. Returns error message or None."""
@@ -2101,8 +2101,8 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                 tts_params = await self._build_moss_tts_params(request)
                 if request.voice:
                     voice_lower = request.voice.lower()
-                    tts_params["voice_name"] = [voice_lower]
-                    tts_params["voice_created_at"] = [self._voice_created_at(voice_lower)]
+                    tts_params.voice_name = [voice_lower]
+                    tts_params.voice_created_at = [self._voice_created_at(voice_lower)]
                 prompt = tokens_input(prompt_token_ids=[1])
                 prompt["additional_information"] = tts_params
             else:

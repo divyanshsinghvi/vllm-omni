@@ -1097,8 +1097,6 @@ class OmniGPUModelRunner(GPUModelRunner):
         try:
             buffer_map = self._gather_runtime_additional_information()
             model_kwargs_extra["model_intermediate_buffer"] = buffer_map
-            # Backward compatible: also emit old name
-            model_kwargs_extra["runtime_additional_information"] = buffer_map
             # Typed views for migrated consumers (3a.2b): payload-shaped struct
             # for stage-output reads, input-shaped struct for input-side reads.
             (

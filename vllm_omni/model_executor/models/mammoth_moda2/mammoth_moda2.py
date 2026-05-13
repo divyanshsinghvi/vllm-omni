@@ -644,10 +644,10 @@ class MammothModa2ARForConditionalGeneration(Qwen2_5_VLForConditionalGeneration)
         inputs_embeds: torch.Tensor | None = None,
         **kwargs: Any,
     ):
-        # vllm-omni runner passes sampling_metadata and runtime_additional_information
+        # vllm-omni runner passes sampling_metadata and model_intermediate_buffer
         # in each forward step. compute_logits is called immediately after
         # forward, so caching here enables step-by-step dynamic token constraints.
-        runtime_infos = kwargs.get("runtime_additional_information")
+        runtime_infos = kwargs.get("model_intermediate_buffer")
         self._last_runtime_additional_information = runtime_infos if isinstance(runtime_infos, list) else None
         hidden_states = super().forward(
             input_ids=input_ids,

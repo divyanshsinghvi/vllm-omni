@@ -134,7 +134,7 @@ class MammothModa2DiTPipeline(nn.Module):
         inputs_embeds: torch.Tensor | None = None,
         **kwargs: Any,  # noqa: ARG002
     ) -> OmniOutput:
-        runtime_addi = kwargs.get("runtime_additional_information", None)
+        runtime_addi = kwargs.get("model_intermediate_buffer", None)
         info = runtime_addi[0]
         text_cond = info["text_prompt_embeds"]
         image_cond = info["image_prompt_embeds"]

@@ -746,7 +746,7 @@ class NPUGenerationModelRunner(OmniNPUModelRunner):
             # run does not raise an error due to missing inputs.
             if hasattr(self.model, "get_dummy_runtime_additional_information"):
                 runtime_addi = self.model.get_dummy_runtime_additional_information(num_reqs)
-                model_kwargs["runtime_additional_information"] = runtime_addi
+                model_kwargs["model_intermediate_buffer"] = runtime_addi
             # -------------------------------------- Omni-new -------------------------------------------------
 
             if self.uses_mrope:

@@ -290,6 +290,7 @@ class OmniPayloadStruct(_StructBase, tag=True):
     past_key_values: list[int] | None = None
     kv_metadata: dict[str, Any] | None = None
     latent_audio_feat: torch.Tensor | None = None  # voxcpm AR→VAE carry-over
+    audio_tokens: torch.Tensor | None = None  # omnivoice generator→decoder carry-over
 
 
 _NESTED_STRUCTS: dict[str, type[_StructBase]] = {

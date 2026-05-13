@@ -328,7 +328,7 @@ class Qwen3OmniMoeForConditionalGeneration(
         codec: torch.Tensor | None = None,
         sampling_metadata: SamplingMetadata | None = None,
         logits_index: int | None = None,
-        runtime_additional_information: list[dict[str, Any]] | None = None,
+        model_intermediate_buffer_struct: list[OmniPayloadStruct] | None = None,
         **kwargs: object,
     ) -> torch.Tensor | IntermediateTensors | OmniOutput:
         """
@@ -428,14 +428,13 @@ class Qwen3OmniMoeForConditionalGeneration(
                 )
                 codes = input_ids_flatten.reshape(1, 16, -1)
 
-            # Generate audio from codec codes
-            # Get every request's left_context_size from runtime_additional_information (passed via kwargs)
+            # Generate audio from codec codes.
+            # Per-request left_context_size from the typed payload struct.
             left_context_size = []
-            if runtime_additional_information is not None:
-                for info in runtime_additional_information:
-                    meta = info.get("meta", {})
-                    if "left_context_size" in meta:
-                        left_context_size.append(meta["left_context_size"])
+            if model_intermediate_buffer_struct is not None:
+                for payload in model_intermediate_buffer_struct:
+                    if payload.meta is not None and payload.meta.left_context_size is not None:
+                        left_context_size.append(payload.meta.left_context_size)
             else:
                 logger.debug("No additional_information provided to code2wav stage.")
             audio_tensors = self.generate_audio(codes, left_context_size, seq_token_counts)

@@ -31,6 +31,7 @@ from vllm.model_executor.models.qwen3 import Qwen3Model
 from vllm.model_executor.models.utils import PPMissingLayer, maybe_prefix
 from vllm.sequence import IntermediateTensors
 
+from vllm_omni.data_entry_keys import OmniPayloadStruct
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 from vllm_omni.utils.speaker_cache import get_speaker_cache
 
@@ -330,20 +331,15 @@ class FishSpeechSlowARForConditionalGeneration(nn.Module):
             return model_outputs
 
         hidden = model_outputs
-        info_dicts = kwargs.get("model_intermediate_buffer")
-        if info_dicts is None:
-            info_dicts = kwargs.get("runtime_additional_information") or []
+        payload_structs: list[OmniPayloadStruct] = kwargs.get("model_intermediate_buffer_struct") or []
 
         audio_codes_list: list[torch.Tensor] = []
-        for info in info_dicts:
-            if not isinstance(info, dict):
-                continue
-            ac = info.get("codes", {}).get("audio")
-            if isinstance(ac, torch.Tensor):
-                audio_codes_list.append(ac)
+        for payload in payload_structs:
+            if payload.codes is not None and isinstance(payload.codes.audio, torch.Tensor):
+                audio_codes_list.append(payload.codes.audio)
 
         if not audio_codes_list:
-            logger.debug("make_omni_output: no audio_codes found in info_dicts (len=%d)", len(info_dicts))
+            logger.debug("make_omni_output: no audio_codes found in payload_structs (len=%d)", len(payload_structs))
             return OmniOutput(text_hidden_states=hidden, multimodal_outputs={})
 
         audio_codes = torch.cat(audio_codes_list, dim=0)

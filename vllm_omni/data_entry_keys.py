@@ -240,6 +240,84 @@ class OmniVoiceInputStruct(_StructBase):
     ref_audio_tokens: torch.Tensor | None = None
 
 
+class DyninOmniInputStruct(_StructBase):
+    """Dynin-Omni task-bridge metadata.
+
+    Producer writes scalars wrapped in 1-element lists via ``_wrap_runtime_field``
+    (see ``dynin_omni_common.build_dynin_online_runtime_info``). Consumers read
+    via ``unwrap_first_value``, so list-shape is part of the wire contract.
+    """
+
+    # Task / control
+    task: list[Any] | None = None
+    prompting_task: list[Any] | None = None
+    detok_id: list[Any] | None = None
+    generated_token_ids: list[Any] | None = None
+    token_ids: list[Any] | None = None
+    use_train_i2i_prompt: list[Any] | None = None
+    uni_prompting: list[Any] | None = None
+    prompting_input: list[Any] | None = None
+    uncond_prompting_input: list[Any] | None = None
+    attention_mask: list[Any] | None = None
+    prompting_config: list[Any] | None = None
+    dynin_prompt_source: list[Any] | None = None
+
+    # Vocab / sizing
+    audio_codebook_size: list[Any] | None = None
+    audio_vocab_offset: list[Any] | None = None
+    codebook_size: list[Any] | None = None
+    image_vocab_offset: list[Any] | None = None
+    text_vocab_size: list[Any] | None = None
+    num_new_special_tokens: list[Any] | None = None
+    t2s_vocab_start: list[Any] | None = None
+    mask_token_id: list[Any] | None = None
+
+    # Generation
+    guidance_scale: list[Any] | None = None
+    cond_dropout_prob: list[Any] | None = None
+    prompting_cond_dropout_prob: list[Any] | None = None
+    noise_schedule: list[Any] | None = None
+    noise_schedule_params: list[Any] | None = None
+    condition: list[Any] | None = None
+    t2s_condition: list[Any] | None = None
+    use_reserved_token: list[Any] | None = None
+    prompting_use_reserved_token: list[Any] | None = None
+
+    # Sequencing
+    seq_len: list[Any] | None = None
+    max_audio_len: list[Any] | None = None
+    max_audio_len_short: list[Any] | None = None
+    max_text_len: list[Any] | None = None
+    prompt_max_text_len: list[Any] | None = None
+    prompting_max_text_len: list[Any] | None = None
+    t2s_token_length: list[Any] | None = None
+    image_resolution: list[Any] | None = None
+    prompt_len: list[Any] | None = None
+    prompt_length: list[Any] | None = None
+    prompt_token_len: list[Any] | None = None
+
+    # I/O paths
+    output_wav_file: list[Any] | None = None
+    sample_rate: list[Any] | None = None
+    sr: list[Any] | None = None
+    tokenizer_path: list[Any] | None = None
+    dynin_config_path: list[Any] | None = None
+    dynin_model_path: list[Any] | None = None
+    vq_model_image_path: list[Any] | None = None
+    vq_model_path_image: list[Any] | None = None
+    vq_model_audio_path: list[Any] | None = None
+    vq_model_path_audio: list[Any] | None = None
+
+    # HF / local-files env flags
+    disable_hf_xet: list[Any] | None = None
+    hf_hub_disable_xet: list[Any] | None = None
+    local_files_only: list[Any] | None = None
+    local_files_only_model: list[Any] | None = None
+    local_files_only_vq_image: list[Any] | None = None
+    local_files_only_vq_audio: list[Any] | None = None
+    model_local_files_only: list[Any] | None = None
+
+
 class OmniInputStruct(_StructBase, tag=True):
     text: str | list[str] | None = None
     speaker: str | list[str] | None = None
@@ -264,6 +342,7 @@ class OmniInputStruct(_StructBase, tag=True):
     voxcpm: VoxCPMInputStruct | None = None
     voxcpm2: VoxCPM2InputStruct | None = None
     omnivoice: OmniVoiceInputStruct | None = None
+    dynin: DyninOmniInputStruct | None = None
 
 
 class OmniPayloadStruct(_StructBase, tag=True):

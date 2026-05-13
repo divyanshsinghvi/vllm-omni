@@ -500,20 +500,19 @@ class VoxCPMForConditionalGeneration(nn.Module):
 
     def _maybe_recover_vae_infos(
         self,
-        infos: list[dict[str, Any]],
         payload_structs: list[OmniPayloadStruct],
         input_ids: torch.Tensor | None,
         *,
         async_chunk: bool,
-    ) -> tuple[list[dict[str, Any]], list[OmniPayloadStruct]]:
+    ) -> list[OmniPayloadStruct]:
         if not async_chunk:
-            return infos, payload_structs
+            return payload_structs
         if any(p.latent_audio_feat is not None for p in payload_structs):
-            return infos, payload_structs
+            return payload_structs
         recovered = self._recover_latent_from_input_ids(input_ids)
         if recovered is None:
-            return infos, payload_structs
-        return [{"latent_audio_feat": recovered}], [OmniPayloadStruct(latent_audio_feat=recovered)]
+            return payload_structs
+        return [OmniPayloadStruct(latent_audio_feat=recovered)]
 
     @staticmethod
     def _normalize_audio_samples(samples: Any) -> np.ndarray:
@@ -608,19 +607,19 @@ class VoxCPMForConditionalGeneration(nn.Module):
         *,
         output_key: str,
         payload_factory: Callable[[], torch.Tensor],
-        infos: list[dict[str, Any]],
+        batch_size: int,
         sample_rate: int,
         out_device: torch.device,
         out_dtype: torch.dtype,
         hidden_rows: int | None = None,
     ) -> OmniOutput:
         if hidden_rows is None:
-            hidden_rows = len(infos)
+            hidden_rows = batch_size
         return OmniOutput(
             text_hidden_states=torch.zeros((hidden_rows, 1), device=out_device, dtype=out_dtype),
             multimodal_outputs={
-                output_key: [payload_factory() for _ in infos],
-                "sr": [torch.tensor(sample_rate, dtype=torch.int32) for _ in infos],
+                output_key: [payload_factory() for _ in range(batch_size)],
+                "sr": [torch.tensor(sample_rate, dtype=torch.int32) for _ in range(batch_size)],
             },
         )
 
@@ -654,7 +653,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
 
     def _forward_vae_stage(
         self,
-        infos: list[dict[str, Any]],
         payload_structs: list[OmniPayloadStruct],
         *,
         sample_rate: int,
@@ -667,7 +665,7 @@ class VoxCPMForConditionalGeneration(nn.Module):
             return self._make_empty_output(
                 output_key="model_outputs",
                 payload_factory=lambda: torch.zeros((0,), dtype=torch.float32),
-                infos=infos,
+                batch_size=len(payload_structs),
                 sample_rate=sample_rate,
                 out_device=out_device,
                 out_dtype=out_dtype,
@@ -692,7 +690,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
 
     def _forward_latent_stage(
         self,
-        infos: list[dict[str, Any]],
         input_structs: list[OmniInputStruct | None],
         *,
         sample_rate: int,
@@ -707,7 +704,7 @@ class VoxCPMForConditionalGeneration(nn.Module):
             return self._make_empty_output(
                 output_key="latent_audio_feat",
                 payload_factory=lambda: torch.zeros((0,), dtype=torch.float32),
-                infos=infos,
+                batch_size=len(input_structs),
                 sample_rate=sample_rate,
                 out_device=out_device,
                 out_dtype=out_dtype,
@@ -718,7 +715,7 @@ class VoxCPMForConditionalGeneration(nn.Module):
         sample_rates: list[torch.Tensor] = []
         last_chunk_flags: list[bool] | None = [] if async_chunk else None
         payload_finished_flags: list[bool] | None = [] if async_chunk else None
-        for info, input_struct in zip(infos, input_structs):
+        for input_struct in input_structs:
             voxcpm = input_struct.voxcpm if input_struct is not None else None
             text = self._extract_val(input_struct, "text", "")
             cfg_value = float(self._extract_val(voxcpm, "cfg_value", 2.0))
@@ -870,8 +867,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
         positions: torch.Tensor | None = None,
         intermediate_tensors: Any = None,
         inputs_embeds: torch.Tensor | None = None,
-        runtime_additional_information: list[dict[str, Any]] | None = None,
-        model_intermediate_buffer: list[dict[str, Any]] | None = None,
         model_input_struct: list[OmniInputStruct | None] | None = None,
         model_intermediate_buffer_struct: list[OmniPayloadStruct] | None = None,
         **kwargs: Any,
@@ -882,22 +877,21 @@ class VoxCPMForConditionalGeneration(nn.Module):
         if input_ids is not None and input_ids.device.type == out_device.type:
             out_device = input_ids.device
 
-        infos = model_intermediate_buffer or runtime_additional_information or [{}]
-        input_structs: list[OmniInputStruct | None] = list(model_input_struct or [None] * len(infos))
+        # Batch shape is determined by ``model_input_struct`` /
+        # ``model_intermediate_buffer_struct`` (paired lists from the runner).
+        n = max(len(model_input_struct or []), len(model_intermediate_buffer_struct or []), 1)
+        input_structs: list[OmniInputStruct | None] = list(model_input_struct or [None] * n)
         payload_structs: list[OmniPayloadStruct] = list(
-            model_intermediate_buffer_struct or [OmniPayloadStruct() for _ in infos]
+            model_intermediate_buffer_struct or [OmniPayloadStruct() for _ in range(n)]
         )
-        hidden_rows = len(infos)
+        hidden_rows = n
         if input_ids is not None and len(input_ids.shape) > 0:
             hidden_rows = max(hidden_rows, int(input_ids.shape[0]))
         sample_rate = int(getattr(self._pipeline, "sample_rate", 24000))
         async_chunk = bool(getattr(self.vllm_config.model_config, "async_chunk", False))
         if self.model_stage in self._VAE_STAGES:
-            infos, payload_structs = self._maybe_recover_vae_infos(
-                infos, payload_structs, input_ids, async_chunk=async_chunk
-            )
+            payload_structs = self._maybe_recover_vae_infos(payload_structs, input_ids, async_chunk=async_chunk)
             return self._forward_vae_stage(
-                infos,
                 payload_structs,
                 sample_rate=sample_rate,
                 async_chunk=async_chunk,
@@ -906,7 +900,6 @@ class VoxCPMForConditionalGeneration(nn.Module):
             )
         if self.model_stage in self._LATENT_STAGES:
             return self._forward_latent_stage(
-                infos,
                 input_structs,
                 sample_rate=sample_rate,
                 async_chunk=async_chunk,

@@ -445,20 +445,36 @@ class VoxCPMForConditionalGeneration(nn.Module):
             return value[0] if value else default
         return value
 
-    def _resolve_stream_request_key(self, info: dict[str, Any], input_struct: OmniInputStruct | None) -> str:
-        cached = input_struct._voxcpm_stream_key if input_struct is not None else None
+    def _resolve_stream_request_key(self, input_struct: OmniInputStruct | None) -> str:
+        """Stable per-request key for ``_latent_stream_gens`` cache.
+
+        Reads and writes strictly through the typed struct. The runner keeps
+        the same ``OmniInputStruct`` instance across steps
+        (``model_input_struct_buffer``), so a struct mutation here persists into
+        the next step's gather.
+        """
+        if input_struct is None:
+            raise ValueError("voxcpm requires model_input_struct to resolve the stream key")
+
+        cached = input_struct._voxcpm_stream_key
         if cached is not None:
             return str(cached)
 
-        omni_req_id = input_struct._omni_req_id if input_struct is not None else None
+        omni_req_id = input_struct._omni_req_id
         if omni_req_id is not None:
-            key = str(omni_req_id)
-            info["_voxcpm_stream_key"] = key
-            return key
+            input_struct._voxcpm_stream_key = str(omni_req_id)
+            return input_struct._voxcpm_stream_key
+
+        global_id = input_struct.global_request_id
+        if isinstance(global_id, list):
+            global_id = global_id[0] if global_id else None
+        if global_id is not None:
+            input_struct._voxcpm_stream_key = str(global_id)
+            return input_struct._voxcpm_stream_key
 
         key = f"voxcpm-local-{self._next_local_stream_key}"
         self._next_local_stream_key += 1
-        info["_voxcpm_stream_key"] = key
+        input_struct._voxcpm_stream_key = key
         return key
 
     def _recover_latent_from_input_ids(self, input_ids: torch.Tensor | None) -> torch.Tensor | None:
@@ -714,7 +730,7 @@ class VoxCPMForConditionalGeneration(nn.Module):
             retry_badcase_ratio_threshold = float(self._extract_val(voxcpm, "retry_badcase_ratio_threshold", 6.0))
             streaming_prefix_len = int(self._extract_val(voxcpm, "streaming_prefix_len", 3))
 
-            request_key = self._resolve_stream_request_key(info, input_struct)
+            request_key = self._resolve_stream_request_key(input_struct)
             created_temp: str | None = None
 
             if async_chunk:

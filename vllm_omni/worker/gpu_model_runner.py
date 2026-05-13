@@ -44,6 +44,11 @@ class OmniGPUModelRunner(GPUModelRunner):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model_intermediate_buffer: dict[str, dict[str, Any]] = {}
+        # Persistent ``OmniInputStruct`` per request. Built lazily from
+        # ``model_intermediate_buffer`` and kept across steps so model mutations
+        # (e.g. voxcpm ``_voxcpm_stream_key``) survive without dict write-back.
+        # Synced with dict writes via ``_resync_input_struct``.
+        self.model_input_struct_buffer: dict[str, OmniInputStruct] = {}
         self._omni_num_scheduled_tokens_np: np.ndarray | None = None
         self._omni_last_model_output: object | None = None
         # The Omni tensor prefix cache will be allocated
@@ -268,6 +273,7 @@ class OmniGPUModelRunner(GPUModelRunner):
         for req_id in scheduler_output.finished_req_ids:
             self.requests.pop(req_id, None)
             self.model_intermediate_buffer.pop(req_id, None)
+            self.model_input_struct_buffer.pop(req_id, None)
             self.num_prompt_logprobs.pop(req_id, None)
             if hasattr(self, "_downstream_payload_cache"):
                 self._downstream_payload_cache.pop(req_id, None)
@@ -1025,31 +1031,55 @@ class OmniGPUModelRunner(GPUModelRunner):
                 per_req_runtime_info.append({})
         return per_req_runtime_info
 
+    def _resync_input_struct(self, req_id: str, info: dict[str, Any]) -> OmniInputStruct | None:
+        """Return the persistent ``OmniInputStruct`` for ``req_id``, building or
+        refreshing it from ``info`` when the dict carries fields the cached
+        struct doesn't yet have. The struct instance is preserved across calls
+        so model mutations persist.
+        """
+        if not info:
+            self.model_input_struct_buffer.pop(req_id, None)
+            return None
+        input_fields = set(OmniInputStruct.__struct_fields__)
+        i_dict = {k: v for k, v in info.items() if k in input_fields}
+        if not i_dict:
+            self.model_input_struct_buffer.pop(req_id, None)
+            return None
+        cached = self.model_input_struct_buffer.get(req_id)
+        if cached is None:
+            cached = to_input_struct(i_dict)
+            self.model_input_struct_buffer[req_id] = cached
+            return cached
+        # Refresh fields that arrived on the dict from external writes
+        # (e.g., scheduler / connector updates); keep model mutations that
+        # only live on the struct (the model never writes those into the dict).
+        for k, v in i_dict.items():
+            setattr(cached, k, v)
+        return cached
+
     def _gather_runtime_additional_information_struct(
         self,
         buffer_map: list[dict],
     ) -> tuple[list[OmniPayloadStruct], list[OmniInputStruct | None]]:
-        """Project each buffer dict into typed ``OmniPayloadStruct`` (stage-output
-        fields) and ``OmniInputStruct`` (input fields) lists.
+        """Build the per-step payload struct list and return the persistent input
+        struct list.
 
-        For first-stage models the buffer mixes input + stage outputs. Splitting
-        by schema lets each consumer read the typed slice it needs. Conversion
-        errors propagate — they indicate a field present in the dict that fits
-        neither schema (real producer/schema mismatch worth fixing).
+        Payload structs are rebuilt each step (they reflect the latest stage
+        output). Input structs are persistent (held in
+        ``model_input_struct_buffer``) so model mutations such as
+        ``_voxcpm_stream_key`` survive across steps without dict write-back.
         """
         payload_fields = set(OmniPayloadStruct.__struct_fields__)
-        input_fields = set(OmniInputStruct.__struct_fields__)
         payload_list: list[OmniPayloadStruct] = []
         input_list: list[OmniInputStruct | None] = []
-        for info in buffer_map:
+        for info, req_id in zip(buffer_map, self.input_batch.req_ids, strict=False):
             if not info:
                 payload_list.append(OmniPayloadStruct())
                 input_list.append(None)
                 continue
             p_dict = {k: v for k, v in info.items() if k in payload_fields}
-            i_dict = {k: v for k, v in info.items() if k in input_fields}
             payload_list.append(to_struct(p_dict) if p_dict else OmniPayloadStruct())
-            input_list.append(to_input_struct(i_dict) if i_dict else None)
+            input_list.append(self._resync_input_struct(req_id, info))
         return payload_list, input_list
 
     def _compute_request_token_spans(self, num_scheduled_tokens_np) -> list[tuple[int, int]]:
@@ -1353,9 +1383,7 @@ class OmniGPUModelRunner(GPUModelRunner):
                 # call the custom process function
                 req_infos["request_id"] = req_id
                 embed_slice = inputs_embeds[s:e] if inputs_embeds is not None else None
-                input_struct_fields = set(OmniInputStruct.__struct_fields__)
-                i_dict = {k: v for k, v in req_infos.items() if k in input_struct_fields}
-                req_input_struct = to_input_struct(i_dict) if i_dict else None
+                req_input_struct = self._resync_input_struct(req_id, req_infos)
                 req_input_ids, req_embeds, update_dict = self.model.preprocess(
                     input_ids=input_ids[s:e],
                     input_embeds=embed_slice,

@@ -46,7 +46,10 @@ def test_micro_world_i2w_generation(model_name: str):
     image = Image.new("RGB", (width, height), color=(40, 40, 60))
 
     outputs = m.generate(
-        prompts="A first person view walking down a quiet street at night.",
+        prompts={
+            "prompt": "A first person view walking down a quiet street at night.",
+            "multi_modal_data": {"image": image},
+        },
         sampling_params_list=OmniDiffusionSamplingParams(
             height=height,
             width=width,
@@ -55,7 +58,6 @@ def test_micro_world_i2w_generation(model_name: str):
             guidance_scale=6.0,
             generator=torch.Generator(current_omni_platform.device_type).manual_seed(42),
             extra_args={
-                "image": image,
                 "mouse_actions": mouse_actions,
                 "keyboard_actions": keyboard_actions,
             },

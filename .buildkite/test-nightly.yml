@@ -989,7 +989,9 @@ steps:
         timeout_in_minutes: 180
         commands:
           - pytest -s -v tests/e2e/accuracy/wan22_i2v/test_wan22_i2v_video_similarity.py -m full_model --run-level full_model
-          - pytest -s -v tests/e2e/accuracy/micro_world/test_micro_world_regression.py -m full_model --run-level full_model
+          - |
+            eval "$(bash tests/e2e/accuracy/micro_world/setup_combined.sh | tail -2 | sed 's/^/export /')" && \
+            pytest -s -v tests/e2e/accuracy/micro_world/test_micro_world_regression.py -m full_model --run-level full_model
           - pytest -s -v tests/e2e/accuracy/test_ltx2_3_video_similarity.py -m full_model --run-level full_model
           - pytest -s -v tests/e2e/accuracy/test_diffusers_backend_similarity.py -k '2v_matches_diffusers' -m full_model --run-level full_model
         agents:

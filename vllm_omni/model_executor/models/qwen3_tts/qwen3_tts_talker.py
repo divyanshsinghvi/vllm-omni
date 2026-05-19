@@ -737,7 +737,7 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
         text = _first(info.get("text"), "")
         language = _first(info.get("language"), "Auto")
         speaker = _first(info.get("speaker"), "").lower().strip()
-        instruct = _first(qwen3.get("instruct"), "")
+        instruct = _first(info.get("instruction"), "")
         non_streaming_mode_raw = _first(qwen3.get("non_streaming_mode"), None)
 
         if isinstance(non_streaming_mode_raw, bool):
@@ -1261,7 +1261,7 @@ class Qwen3TTSTalkerForConditionalGeneration(nn.Module):
         )
 
         # Optional instruct prefix.
-        instruct = (qwen3.get("instruct") or [""])[0]
+        instruct = (info_dict.get("instruction") or [""])[0]
         instruct_embed = None
         if isinstance(instruct, str) and instruct.strip():
             instruct_ids = tok(self._build_instruct_text(instruct), return_tensors="pt", padding=False)["input_ids"].to(

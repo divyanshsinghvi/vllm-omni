@@ -1716,8 +1716,10 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         elif qwen3.task_type[0] == "CustomVoice":
             inp.speaker = ["Vivian"]  # Default for CustomVoice
 
-        # Instructions for style/emotion control
-        qwen3.instruct = [request.instructions] if request.instructions is not None else [""]
+        # Instructions for style/emotion control — top-level ``instruction`` is
+        # the cross-model alias for the same intent (consumers prefer it).
+        if request.instructions is not None:
+            inp.instruction = request.instructions
 
         # Voice clone: ref_audio resolved in create_speech(), not here.
         if request.ref_text is not None:
@@ -1819,15 +1821,13 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         ph_len = self._estimate_fish_prompt_len(normalized_text, normalized_ref_text, ref_audio_data)
 
         # Structured clone branch: scalars (not list-wrapped) because the model-side
-        # preprocess() consumes per-request scalar fields directly.
+        # preprocess() consumes per-request scalar fields directly. Reference audio
+        # carried through the top-level ``ref_audio`` [[wav, sr]] shape.
         additional_information = OmniInputStruct(
             text=normalized_text,
             ref_text=normalized_ref_text,
-            fish_speech=FishSpeechInputStruct(
-                ref_audio_wav=torch.from_numpy(np.asarray(wav_samples, dtype=np.float32)),
-                ref_audio_sr=int(sr),
-                fish_structured_voice_clone=True,
-            ),
+            ref_audio=[[torch.from_numpy(np.asarray(wav_samples, dtype=np.float32)), int(sr)]],
+            fish_speech=FishSpeechInputStruct(fish_structured_voice_clone=True),
         )
         # Pass voice identity for model-side DAC code caching.
         if request.voice is not None:
@@ -1978,7 +1978,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         # voice_name enables talker-side voice preset resolution (e.g. "DB30").
         ming = MingTTSInputStruct(
             ming_task="instruct",
-            prompt=MING_DEFAULT_PROMPT,
+            template=MING_DEFAULT_PROMPT,
             use_zero_spk_emb=not has_spk_emb,
             max_decode_steps=request.max_new_tokens or _TTS_MAX_NEW_TOKENS_MAX,
             cfg=2.0,

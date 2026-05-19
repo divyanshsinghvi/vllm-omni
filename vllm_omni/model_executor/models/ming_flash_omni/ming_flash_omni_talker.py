@@ -353,7 +353,7 @@ class MingFlashOmniTalkerForConditionalGeneration(nn.Module, CustomProcessMixin)
             temperature = 0.0
             max_steps = 200
         else:
-            prompt = (ming.prompt if ming is not None else None) or MING_DEFAULT_PROMPT
+            prompt = (ming.template if ming is not None else None) or MING_DEFAULT_PROMPT
             instruction_field = input_struct.instruction if input_struct is not None else None
             instruction = self._unwrap_scalar(instruction_field)
             use_zero_spk_emb = bool((ming.use_zero_spk_emb if ming is not None else None) or False)

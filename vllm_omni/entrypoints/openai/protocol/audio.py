@@ -20,7 +20,7 @@ class OpenAICreateSpeechRequest(BaseModel):
     )
     instructions: str | None = Field(
         default=None,
-        description="Instructions for voice style/emotion (maps to 'instruct' for Qwen3-TTS)",
+        description="Instructions for voice style/emotion (maps to OmniInputStruct.instruction)",
     )
     response_format: Literal["wav", "pcm", "flac", "mp3", "aac", "opus"] = "wav"
     speed: float | None = Field(

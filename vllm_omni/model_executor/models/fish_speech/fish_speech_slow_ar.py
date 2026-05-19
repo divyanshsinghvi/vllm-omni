@@ -530,10 +530,8 @@ class FishSpeechSlowARForConditionalGeneration(nn.Module):
 
     def _build_structured_voice_clone_prefill_embeds(self, info_dict: dict[str, Any]) -> torch.Tensor:
         tokenizer = self._get_tokenizer()
-        fish_speech_info = info_dict.get("fish_speech") or {}
         ref_text = info_dict.get("ref_text")
         text = info_dict.get("text")
-        ref_audio_sr = fish_speech_info.get("ref_audio_sr")
         if not isinstance(ref_text, str) or not isinstance(text, str):
             raise ValueError("Fish Speech structured voice clone requires string text and ref_text")
 
@@ -559,12 +557,17 @@ class FishSpeechSlowARForConditionalGeneration(nn.Module):
                     ref_codes_fq,
                 )
 
-        if not isinstance(ref_audio_sr, int):
-            raise ValueError("Fish Speech structured voice clone requires integer ref_audio_sr")
-
-        ref_audio_wav_raw = fish_speech_info.get("ref_audio_wav")
-        if ref_audio_wav_raw is None:
-            raise ValueError("Fish Speech structured voice clone requires ref_audio_wav")
+        # Reference audio is delivered as [[wav, sr]] under the top-level ref_audio field.
+        ref_audio_field = info_dict.get("ref_audio")
+        if not isinstance(ref_audio_field, list) or not ref_audio_field:
+            raise ValueError("Fish Speech structured voice clone requires ref_audio = [[wav, sr]]")
+        ref_audio_pair = ref_audio_field[0]
+        if not isinstance(ref_audio_pair, (list, tuple)) or len(ref_audio_pair) != 2:
+            raise ValueError("Fish Speech structured voice clone requires ref_audio = [[wav, sr]]")
+        ref_audio_wav_raw, ref_audio_sr_raw = ref_audio_pair
+        if not isinstance(ref_audio_sr_raw, int):
+            raise ValueError("Fish Speech structured voice clone requires integer ref_audio sample rate")
+        ref_audio_sr = ref_audio_sr_raw
         if isinstance(ref_audio_wav_raw, torch.Tensor):
             ref_audio_wav = ref_audio_wav_raw.cpu().numpy()
         else:

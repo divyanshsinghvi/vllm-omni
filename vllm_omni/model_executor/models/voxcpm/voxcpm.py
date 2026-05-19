@@ -562,18 +562,12 @@ class VoxCPMForConditionalGeneration(nn.Module):
 
     @classmethod
     def _resolve_prompt_inputs(cls, input_struct: OmniInputStruct | None) -> tuple[str | None, str | None, str | None]:
-        # ``prompt_text``/``ref_text``/``ref_audio`` are cross-model top-level
-        # fields; ``prompt_wav_path`` lives on the voxcpm substruct.
-        voxcpm = input_struct.voxcpm if input_struct is not None else None
-        prompt_text = cls._extract_val(input_struct, "prompt_text", None)
-        prompt_wav_path = cls._extract_val(voxcpm, "prompt_wav_path", None)
-        if prompt_wav_path:
-            if prompt_text is None:
-                prompt_text = cls._extract_val(input_struct, "ref_text", None)
-            return prompt_wav_path, prompt_text, None
-
+        # ``ref_audio`` carries either a filesystem path (str) or a normalized
+        # waveform spec ``[wav, sr]``; ``ref_text`` / ``prompt_text`` are paired.
         ref_audio = cls._extract_val(input_struct, "ref_audio", None)
-        ref_text = cls._extract_val(input_struct, "ref_text", None)
+        ref_text = cls._extract_val(input_struct, "ref_text", None) or cls._extract_val(
+            input_struct, "prompt_text", None
+        )
         if ref_audio is None or ref_text is None:
             return None, None, None
         if isinstance(ref_audio, str):

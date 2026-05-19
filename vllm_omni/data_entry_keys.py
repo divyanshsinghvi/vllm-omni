@@ -174,9 +174,6 @@ class Qwen3TTSInputStruct(_StructBase):
     x_vector_only_mode: bool | list[bool] | None = None
     voice_clone_prompt: list[VoiceClonePromptStruct] | None = None
     non_streaming_mode: bool | list[bool] | None = None
-    # ``instruct`` (qwen3_tts wire-name); the top-level ``OmniInputStruct.instruction``
-    # is the cross-model alias for the same intent.
-    instruct: str | list[str] | None = None
     ref_ids: list[int] | None = None
 
 
@@ -197,7 +194,9 @@ class MossTTSInputStruct(_StructBase):
 
 class MingTTSInputStruct(_StructBase):
     ming_task: str | None = None
-    prompt: str | None = None
+    # Ming-internal prompt template (e.g. MING_DEFAULT_PROMPT). Not user input text;
+    # ``OmniInputStruct.text`` carries the user's utterance.
+    template: str | None = None
     use_zero_spk_emb: bool | None = None
     cfg: float | None = None
     sigma: float | None = None
@@ -215,8 +214,6 @@ class MingTTSInputStruct(_StructBase):
 
 class FishSpeechInputStruct(_StructBase):
     fish_structured_voice_clone: bool | None = None
-    ref_audio_wav: torch.Tensor | None = None
-    ref_audio_sr: int | None = None
 
 
 class VoxCPMInputStruct(_StructBase):
@@ -228,7 +225,6 @@ class VoxCPMInputStruct(_StructBase):
     retry_badcase_max_times: int | list[int] | None = None
     retry_badcase_ratio_threshold: float | list[float] | None = None
     streaming_prefix_len: int | list[int] | None = None
-    prompt_wav_path: str | list[str] | None = None
 
 
 class VoxCPM2InputStruct(_StructBase):
